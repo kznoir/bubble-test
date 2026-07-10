@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Reverse Merge Bubble Prototype v61 - Fixed Aspect Mobile Viewport</title>
+  <title>Reverse Merge Bubble Prototype v62 - Longer Low-Speed Pull Range</title>
   <style>
     * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -84,7 +84,7 @@
 <div id="wrap">
   <canvas id="game" width="390" height="844"></canvas>
 </div>
-<div id="note">v61: PC・iPhone・iPadで縦横比固定 / R: restart</div>
+<div id="note">v62: 低速ショットの引っ張り幅を拡大 / R: restart</div>
 
 <script>
 (() => {
@@ -110,10 +110,11 @@
     shooterYOffset: 130,
     aimLimitDeg: 90,          // 真上0°から左右±45°
     dragMaxDistance: 170,
-    dragDeadZone: 10,
+    dragDeadZone: 18,
     shotPowerMin: 0.625,
     shotPowerMax: 32,
     shotPowerCurve: 1.0,
+    shotPowerStartDistance: 44, // v62: ここまでは最低速。スマホで低速調整しやすくする
     reloadTimeMs: 180,
     guideFadeStartY: 530,     // ここから上でガイドを薄くする
     guideFadeEndY: 420,       // 画面中央付近で見えなくする
@@ -191,7 +192,7 @@
     mergeCooldownMs: 180,
     scoreBase: 10,
     mergeImpulse: 0.075,
-    // v61: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
+    // v62: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
     mergeImpulseRadius: 120,
     mergeImpulseStrength: 1.05,
     mergeImpulseMinStrength: 0.12,
@@ -199,7 +200,7 @@
     mergeImpulseNuisanceScale: 0.85,
     mergeImpulseAngularStrength: 0.018,
 
-    // v61: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
+    // v62: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
     topReliefZone: 122,
     topReliefCountThreshold: 7,
     topReliefStillSpeedThreshold: 0.42,
@@ -212,7 +213,7 @@
     // nuisance
     nuisanceEnabled: true,
             nuisanceRadiusLevelEquivalent: 2,
-    // v61: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
+    // v62: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
     nuisanceSoftEnabled: true,
     nuisanceSoftExtraCompression: 0.060,
     nuisanceSoftImpactThresholdScale: 0.62,
@@ -271,7 +272,7 @@
     y: H - CONFIG.shooterYOffset
   };
 
-  const seabedY = H - 77; // v61: 砲台だけ下げ、トゲ海底位置は従来付近に固定
+  const seabedY = H - 77; // v62: 砲台だけ下げ、トゲ海底位置は従来付近に固定
   const fieldCenterX = W / 2;
 
   function fieldNx(x) {
@@ -336,7 +337,7 @@
     "#5de0bd", "#ffd0f3", "#ffffff"
   ];
   const labels = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-  // v61: レベル10を最終到達点にしたスイカゲーム式の合成得点。
+  // v62: レベル10を最終到達点にしたスイカゲーム式の合成得点。
   // 1+1で2を作ると1点、9+9で10を作ると55点。
   const suikaMergeScores = [0, 0, 1, 3, 6, 10, 15, 21, 28, 36, 55];
 
@@ -381,7 +382,7 @@
 
   function loadHighScore() {
     try {
-      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v61");
+      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v62");
       highScore = v ? Math.max(0, Number(v) || 0) : 0;
     } catch (_) {
       highScore = 0;
@@ -390,7 +391,7 @@
 
   function saveHighScore() {
     try {
-      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v61", String(highScore));
+      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v62", String(highScore));
     } catch (_) {}
   }
 
@@ -603,7 +604,17 @@
     const dirY = -Math.cos(offsetRad);
 
     const pullDistance = clamp(pullDistanceRaw, 0, CONFIG.dragMaxDistance);
-    const powerRatio = clamp(pullDistance / CONFIG.dragMaxDistance, 0, 1);
+
+    // v62:
+    // 最大引っ張り距離と最大射出速度は維持したまま、
+    // 低速域だけ物理的な引っ張り幅を長く取る。
+    // shotPowerStartDistanceまでは最低速、その先から最大距離までを0〜1に再マップ。
+    const powerRatio = clamp(
+      (pullDistance - CONFIG.shotPowerStartDistance) /
+      Math.max(1, CONFIG.dragMaxDistance - CONFIG.shotPowerStartDistance),
+      0,
+      1
+    );
     const curvedPower = Math.pow(powerRatio, CONFIG.shotPowerCurve);
     const speed = CONFIG.shotPowerMin + (CONFIG.shotPowerMax - CONFIG.shotPowerMin) * curvedPower;
 
@@ -1188,7 +1199,7 @@
       }
     }
 
-    // v61: 合体時の軽い周囲衝撃。
+    // v62: 合体時の軽い周囲衝撃。
     // スイカゲームのような「合体したら周りが少し崩れて連鎖する」余地を作る。
     for (const o of objects) {
       if (o === merged || o.marked) continue;
@@ -1416,7 +1427,7 @@
               o.vy += Math.cos(unstickPhase * 0.73) * CONFIG.stuckUnstickStrength * 0.32 * topPressure * calmAfterShot * stepDt;
             }
 
-            // v61: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
+            // v62: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
             // 常時水流ではなく、詰まり時の「まぎれ」用。
             if (currentTopReliefLevel > 0) {
               const reliefPhase = now * 0.0024 + o.id * 2.113;
@@ -1981,7 +1992,7 @@
     ctx.textBaseline = "middle";
     ctx.fillText(labels[currentLevel], shooter.x, shooter.y + 1);
 
-    // v61: 弾表示の上から砲身を薄く再描画して、5などでも発射方向が隠れないようにする。
+    // v62: 弾表示の上から砲身を薄く再描画して、5などでも発射方向が隠れないようにする。
     ctx.save();
     ctx.translate(shooter.x, shooter.y);
     ctx.rotate(Math.atan2(shot.dirY, shot.dirX));
