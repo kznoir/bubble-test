@@ -1,0 +1,2110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Reverse Merge Bubble Prototype v60 - Fixed Aspect PC</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at top, #22335e 0%, #0f1424 58%, #070a12 100%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      touch-action: none;
+      color: white;
+    }
+    #wrap {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 8px;
+      overflow: hidden;
+      background: #050812;
+    }
+    canvas {
+      /* v60: 表示サイズも必ず 390:844 に固定する。
+         横幅だけ、または縦幅だけで縮めると環境によって縦潰れするため、
+         画面の縦横どちらにも収まる最大サイズを幅から決める。 */
+      width: min(calc(100vw - 16px), calc((100vh - 16px) * 390 / 844), 462px);
+      height: auto;
+      aspect-ratio: 390 / 844;
+      display: block;
+      border-radius: 22px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.45);
+      background: linear-gradient(#16345c, #08101d);
+      touch-action: none;
+    }
+    #note {
+      position: fixed;
+      left: 10px;
+      right: 10px;
+      bottom: 8px;
+      text-align: center;
+      color: rgba(255,255,255,.58);
+      font-size: 11px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="390" height="844"></canvas>
+</div>
+<div id="note">v60: PCブラウザで縦横比固定 / レベル10MAX / R: restart</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const CONFIG = {
+    width: 390,
+    height: 844,
+
+    // field
+    sidePadding: 10,
+    hudHeight: 86,
+    topPadding: 104,
+    bottomPadding: 18,
+    topArcDepth: 22,
+    seabedArcHeight: 18,
+    seabedThickness: 72,
+    seabedGameOverGraceMs: 900,
+    gameOverAllShakeDelayMs: 1000,
+
+    // shooter
+    shooterXRatio: 0.5,
+    shooterYOffset: 130,
+    aimLimitDeg: 90,          // 真上0°から左右±45°
+    dragMaxDistance: 170,
+    dragDeadZone: 10,
+    shotPowerMin: 0.625,
+    shotPowerMax: 32,
+    shotPowerCurve: 1.0,
+    reloadTimeMs: 180,
+    guideFadeStartY: 530,     // ここから上でガイドを薄くする
+    guideFadeEndY: 420,       // 画面中央付近で見えなくする
+    guideMinLengthRatio: 0.33,
+    guideMaxSteps: 105,
+
+    // trajectory / active shot
+    activeFriction: 0.996,    // 発射中は角度を変えず、速度だけ落とす
+    activeWallRestitution: 0.92,
+    activeStopSpeed: 2.15,
+    activeMaxAgeMs: 2400,
+
+    // object levels
+    maxLevel: 10,
+    nextLevelMin: 1,
+    nextLevelMax: 5,
+    radii: [0, 18, 24, 31, 39, 49, 60, 73, 87, 103, 121, 141],
+
+    // settled bubble behavior
+    buoyancy: -0.043,         // 接触後・停止後の泡だけ上へ浮く
+    maxUpSpeed: -1.65,
+    damping: 0.992,
+    wallRestitution: 0.38,
+    objectRestitution: 0.125,
+    collisionAbsorption: 0.145,
+    squashImpactThreshold: 2.35,
+    squashMax: 0.145,
+    squashRecover: 0.42,
+    squashVisibleMs: 260,
+    squashPowerCurve: 1.35,
+    collisionCompressionMax: 0.18,
+    compressionPassDamping: 0.925,
+    highImpactRestitutionReduction: 0.55,
+    ambientBubbleCount: 60,
+    ambientBubbleMinR: 1,
+    ambientBubbleMaxR: 3,
+    ambientBubbleSpeedMin: 0.18,
+    ambientBubbleSpeedMax: 0.75,
+    ambientBubbleDrift: 0.18,
+    spikePeriod: 33,
+    spikeHeight: 44,
+    spikeBaseOffset: 4,
+    idleMotionEnabled: true,
+    idleDriftStrength: 0.010,
+    idleVerticalDriftStrength: 0.003,
+    idleMotionSpeed: 0.0018,
+    idleSpinStrength: 0.00053,
+    topCurrentBand: 240,
+    topCurrentStrength: 0.016,
+    topCurrentVerticalStrength: 0.004,
+    topCurrentSpeed: 0.00115,
+    stuckDriftDelayMs: 700,
+    stuckSpeedThreshold: 0.26,
+    stuckUnstickStrength: 0.012,
+    sameLevelMergeAssistRange: 18,
+    sameLevelMergeAssistStrength: 0.018,
+    sameLevelMergeAssistMaxSpeed: 1.15,
+    sameLevelMergeAssistDelayMs: 650,
+    sameLevelMergeAssistTopBoost: 0.35,
+    ceilingBuoyancySlideStrength: 0.075,
+    ceilingContactDownBias: 0.018,
+    contactFriction: 0.018,
+    spinToMotionFriction: 0.0065,
+    angularDamping: 0.9975,
+    idleSpinBiasStrength: 0.00018,
+    maxAngularVelocity: 0.006,
+    activeSpinMultiplier: 0.018,
+    nuisancePopTolerance: 10,
+    particleLifetimeMs: 520,
+    particleBurstCount: 16,
+    collisionIterations: 4,
+    physicsSubsteps: 4,
+
+    // merge
+    mergeCooldownMs: 180,
+    scoreBase: 10,
+    mergeImpulse: 0.075,
+    // v60: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
+    mergeImpulseRadius: 120,
+    mergeImpulseStrength: 1.05,
+    mergeImpulseMinStrength: 0.12,
+    mergeImpulseVerticalBias: 0.35,
+    mergeImpulseNuisanceScale: 0.85,
+    mergeImpulseAngularStrength: 0.018,
+
+    // v60: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
+    topReliefZone: 122,
+    topReliefCountThreshold: 7,
+    topReliefStillSpeedThreshold: 0.42,
+    topReliefSlideBoost: 0.055,
+    topReliefUnstickBoost: 0.008,
+    topReliefMaxObjectsForFullBoost: 13,
+    maxLevelMergeClears: true,
+    maxLevelBonusScore: 0,
+
+    // nuisance
+    nuisanceEnabled: true,
+            nuisanceRadiusLevelEquivalent: 2,
+    // v60: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
+    nuisanceSoftEnabled: true,
+    nuisanceSoftExtraCompression: 0.060,
+    nuisanceSoftImpactThresholdScale: 0.62,
+    nuisanceSoftImpactCompressionScale: 0.75,
+    nuisanceSoftPressureCompressionScale: 0.48,
+    nuisanceSoftPassDamping: 0.965,
+    nuisanceSoftVisualScale: 0.34,
+    nuisanceSoftVisualMax: 0.045,
+    nuisanceSoftNormalVisualScale: 0.58,
+    nuisanceSoftRestitutionScale: 0.78,
+    nuisanceSoftAbsorption: 0.08,
+    nuisanceNoSpawnUntilMs: 12000,
+    nuisanceFirstSpawnAtMs: 13000,
+    nuisanceFastIntervalStartMs: 36000,
+    nuisanceWaveCount: 2,
+    nuisanceSlowIntervalAfterLaunchMs: 16000,
+    nuisanceFastIntervalAfterLaunchMs: 8000,
+    nuisanceTelegraphMs: 4000,
+    nuisanceGrowFromScale: 0.18,
+    nuisanceSpawnBottomOffset: 54,
+    nuisanceSpawnSafeGap: 84,
+    nuisanceAscendSpeed: -1.2,
+    nuisanceRiseDistanceFromGround: 58,
+    nuisanceSpawnGroundInset: 10,
+    nuisanceGroundGrowPortion: 0.52,   // 前半は地面に接したまま成長
+    nuisanceDetachSizeRatio: 0.62,     // この大きさになったら地面を離れる
+    nuisanceGroundContactOffset: 2,
+    nuisancePreviewLiftSpeed: -0.58,   // 地表を離れた後の上昇速度
+    nuisanceUndergroundDepth: 46,
+    nuisanceSurfacePauseMs: 520,
+    nuisanceHorizontalGap: 112,       // 発射砲付近には湧かせない
+    nuisanceSpawnSpikeGraceMs: 2400,  // 地面から生える演出中はトゲ判定しない
+    nuisanceTelegraphJitter: 1.8,
+    nuisanceClearMinMergeLevel: 6,
+    nuisanceClearRadius: 92,
+
+    // game over
+
+    startSeedObjects: 9
+  };
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  window.addEventListener("error", (e) => {
+    const note = document.getElementById("note");
+    if (note) note.textContent = "Runtime error: " + (e.message || "unknown");
+  });
+
+
+  const W = CONFIG.width;
+  const H = CONFIG.height;
+
+  const shooter = {
+    x: W * CONFIG.shooterXRatio,
+    y: H - CONFIG.shooterYOffset
+  };
+
+  const seabedY = H - 77; // v60: 砲台だけ下げ、トゲ海底位置は従来付近に固定
+  const fieldCenterX = W / 2;
+
+  function fieldNx(x) {
+    const half = (W - CONFIG.sidePadding * 2) / 2;
+    return clamp((x - fieldCenterX) / half, -1, 1);
+  }
+
+  // ツムランド風：上辺は中央が持ち上がる弧
+  function topArcY(x) {
+    const nx = fieldNx(x);
+    return CONFIG.topPadding - CONFIG.topArcDepth * (1 - nx * nx);
+  }
+
+  function topArcNormal(x) {
+    const half = (W - CONFIG.sidePadding * 2) / 2;
+    const nx = fieldNx(x);
+    const dydx = (2 * CONFIG.topArcDepth * nx) / half;
+    let nxv = -dydx;
+    let nyv = 1;
+    const len = Math.hypot(nxv, nyv) || 1;
+    return { x: nxv / len, y: nyv / len };
+  }
+
+  // 下辺/海底側：中央が少しせり上がる弧
+  function seabedArcY(x) {
+    const nx = fieldNx(x);
+    return seabedY - CONFIG.seabedArcHeight * (1 - nx * nx);
+  }
+
+
+  function triWave(x, period) {
+    const t = ((x / period) % 1 + 1) % 1;
+    return 1 - Math.abs(t * 2 - 1);
+  }
+
+  // 見た目上の危険ライン。海底の上にトゲを立てる。
+  function seabedSpikeY(x) {
+    const base = seabedArcY(x) + CONFIG.spikeBaseOffset;
+    const spike = triWave(x + 7, CONFIG.spikePeriod) * CONFIG.spikeHeight;
+    return base - spike;
+  }
+
+  function makeAmbientBubble(initial = false) {
+    const r = rand(CONFIG.ambientBubbleMinR, CONFIG.ambientBubbleMaxR);
+    const spawnBandTop = CONFIG.topPadding + 6;
+    const spawnBandBottom = H + rand(0, 180);
+    return {
+      x: rand(CONFIG.sidePadding + 8, W - CONFIG.sidePadding - 8),
+      y: initial ? rand(spawnBandTop, H + 60) : spawnBandBottom,
+      r,
+      vy: -rand(CONFIG.ambientBubbleSpeedMin, CONFIG.ambientBubbleSpeedMax),
+      drift: rand(-CONFIG.ambientBubbleDrift, CONFIG.ambientBubbleDrift),
+      phase: rand(0, Math.PI * 2),
+      alpha: rand(0.09, 0.25)
+    };
+  }
+
+  const colors = [
+    "#000000",
+    "#7be7ff", "#8cff9c", "#ffe36e", "#ffb36b",
+    "#ff7da8", "#c78bff", "#7aa7ff", "#ff6e6e",
+    "#5de0bd", "#ffd0f3", "#ffffff"
+  ];
+  const labels = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+  // v60: レベル10を最終到達点にしたスイカゲーム式の合成得点。
+  // 1+1で2を作ると1点、9+9で10を作ると55点。
+  const suikaMergeScores = [0, 0, 1, 3, 6, 10, 15, 21, 28, 36, 55];
+
+  function scoreForMergedLevel(level) {
+    return suikaMergeScores[Math.min(level, suikaMergeScores.length - 1)] || 0;
+  }
+
+  let objects = [];
+  let idSeq = 1;
+  let currentLevel = 1;
+  let nextLevel = 1;
+  let shots = 0;
+  let score = 0;
+  let drag = null;
+  let gameOver = false;
+  let lastShotAt = -9999;
+  let lastTs = performance.now();
+  let lastShotTrace = null;
+  let pendingNuisances = [];
+  let gameStartAt = performance.now();
+  let nextNuisanceWaveAt = 13000;
+  let waitingForNuisanceLaunch = false;
+  let particles = [];
+  let currentTopReliefLevel = 0;
+  let ambientBubbles = [];
+  let highScore = 0;
+  let gameOverAt = null;
+  let gameOverTouchedIds = [];
+  let gameEndElapsedMs = 0;
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function randomNextLevel() {
+    return Math.floor(rand(CONFIG.nextLevelMin, CONFIG.nextLevelMax + 1));
+  }
+
+  function loadHighScore() {
+    try {
+      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v60");
+      highScore = v ? Math.max(0, Number(v) || 0) : 0;
+    } catch (_) {
+      highScore = 0;
+    }
+  }
+
+  function saveHighScore() {
+    try {
+      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v60", String(highScore));
+    } catch (_) {}
+  }
+
+  function updateHighScore() {
+    if (score > highScore) {
+      highScore = score;
+      saveHighScore();
+    }
+  }
+
+  function resetAmbientBubbles() {
+    ambientBubbles = [];
+    for (let i = 0; i < CONFIG.ambientBubbleCount; i++) {
+      ambientBubbles.push(makeAmbientBubble(true));
+    }
+  }
+
+  function updateAmbientBubbles(dt, now) {
+    for (const b of ambientBubbles) {
+      b.y += b.vy * dt;
+      b.x += Math.sin(now * 0.0012 + b.phase) * b.drift * dt * 0.18;
+      if (b.x < CONFIG.sidePadding + b.r) b.x = CONFIG.sidePadding + b.r;
+      if (b.x > W - CONFIG.sidePadding - b.r) b.x = W - CONFIG.sidePadding - b.r;
+
+      if (b.y < topArcY(b.x) - 30) {
+        const nb = makeAmbientBubble(false);
+        b.x = nb.x;
+        b.y = nb.y;
+        b.r = nb.r;
+        b.vy = nb.vy;
+        b.drift = nb.drift;
+        b.phase = nb.phase;
+        b.alpha = nb.alpha;
+      }
+    }
+  }
+
+  function drawTopCurrentHints(now) {
+    ctx.save();
+    ctx.globalAlpha = 0.13;
+    ctx.strokeStyle = "rgba(170,225,255,.52)";
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 5; i++) {
+      const y = topArcY(W / 2) + 58 + i * 34;
+      ctx.beginPath();
+      for (let x = CONFIG.sidePadding + 12; x <= W - CONFIG.sidePadding - 12; x += 10) {
+        const wave = Math.sin(now * 0.0017 + x * 0.028 + i * 1.4) * 2.4;
+        const yy = y + wave;
+        if (x === CONFIG.sidePadding + 12) ctx.moveTo(x, yy);
+        else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawAmbientBubbles(now) {
+    ctx.save();
+    for (const b of ambientBubbles) {
+      const wobbleX = Math.sin(now * 0.002 + b.phase) * (1.2 + b.r * 0.06);
+      const wobbleY = Math.cos(now * 0.0016 + b.phase * 1.7) * 0.8;
+      const x = b.x + wobbleX;
+      const y = b.y + wobbleY;
+
+      const grd = ctx.createRadialGradient(x - b.r * 0.35, y - b.r * 0.45, b.r * 0.12, x, y, b.r);
+      grd.addColorStop(0, `rgba(255,255,255,${b.alpha * 1.2})`);
+      grd.addColorStop(0.35, `rgba(180,225,255,${b.alpha * 0.75})`);
+      grd.addColorStop(1, `rgba(120,170,230,${b.alpha * 0.22})`);
+
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = `rgba(220,245,255,${b.alpha * 0.95})`;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.arc(x, y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(255,255,255,${b.alpha * 0.85})`;
+      ctx.beginPath();
+      ctx.arc(x - b.r * 0.33, y - b.r * 0.33, Math.max(1.2, b.r * 0.16), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function getElapsedPlayMs(now = performance.now()) {
+    return gameOver ? gameEndElapsedMs : Math.max(0, now - gameStartAt);
+  }
+
+  function formatHudTime(ms) {
+    const totalTenths = Math.floor(ms / 100);
+    const minutes = Math.floor(totalTenths / 600);
+    const seconds = Math.floor((totalTenths % 600) / 10);
+    const tenths = totalTenths % 10;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+  }
+
+  function getGameOverShake(o, now = performance.now()) {
+    if (!gameOver || gameOverAt == null) {
+      return { dx: 0, dy: 0, da: 0, scale: 1 };
+    }
+
+    const t = Math.max(0, now - gameOverAt);
+    const isTouched = gameOverTouchedIds.includes(o.id);
+
+    // 触れたものは即シェイク。
+    // それ以外は1秒後から全体シェイクに参加。
+    const allShakeStarted = t >= CONFIG.gameOverAllShakeDelayMs;
+    if (!isTouched && !allShakeStarted) {
+      return { dx: 0, dy: 0, da: 0, scale: 1 };
+    }
+
+    const localT = isTouched ? t : (t - CONFIG.gameOverAllShakeDelayMs);
+    const decay = Math.exp(-localT / 1000);
+    const amp = (isTouched ? 4.6 : 2.1) * decay;
+    const dx = Math.sin(localT * 0.12 + o.id * 1.73) * amp;
+    const dy = Math.cos(localT * 0.16 + o.id * 2.11) * amp * 0.75;
+    const da = Math.sin(localT * 0.14 + o.id * 0.9) * amp * 0.018;
+    const scale = 1 + (isTouched ? 0.034 : 0.018) * Math.sin(localT * 0.095 + o.id * 0.6) * decay;
+    return { dx, dy, da, scale };
+  }
+
+  function radiusFor(level, type = "normal") {
+    if (type === "nuisance") return CONFIG.radii[CONFIG.nuisanceRadiusLevelEquivalent];
+    return CONFIG.radii[level];
+  }
+
+  function makeBall({ level, x, y, vx = 0, vy = 0, type = "normal", active = false }) {
+    const r = radiusFor(level, type);
+    return {
+      id: idSeq++,
+      type,
+      level,
+      active,
+      x, y, vx, vy,
+      r,
+      mass: r * r,
+      bornAt: performance.now(),
+      angle: rand(0, Math.PI * 2),
+      angularVelocity: rand(-CONFIG.idleSpinStrength * 3.2, CONFIG.idleSpinStrength * 3.2),
+      squash: 0,
+      squashAngle: 0,
+      squashAt: -9999,
+      lastMergedAt: -9999,
+      marked: false,
+      overSince: null
+    };
+  }
+
+  function reset() {
+    objects = [];
+    idSeq = 1;
+    currentLevel = randomNextLevel();
+    nextLevel = randomNextLevel();
+    shots = 0;
+    score = 0;
+    drag = null;
+    gameOver = false;
+    lastShotAt = -9999;
+    lastShotTrace = null;
+    pendingNuisances = [];
+    gameStartAt = performance.now();
+    nextNuisanceWaveAt = CONFIG.nuisanceFirstSpawnAtMs;
+    waitingForNuisanceLaunch = false;
+    particles = [];
+    resetAmbientBubbles();
+    gameOverAt = null;
+    gameOverTouchedIds = [];
+    gameEndElapsedMs = 0;
+
+    // ツムランド風に、上側に泡群があるところから始める
+    for (let i = 0; i < CONFIG.startSeedObjects; i++) {
+      const lv = Math.floor(rand(1, 5));
+      const r = CONFIG.radii[lv];
+      const x = rand(r + 18, W - r - 18);
+      const y = rand(70, seabedY - 270);
+      objects.push(makeBall({ level: lv, x, y, vx: rand(-0.35, 0.35), vy: rand(-0.15, 0.15) }));
+    }
+  }
+
+  function getPointer(e) {
+    const rect = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return {
+      x: (p.clientX - rect.left) * (canvas.width / rect.width),
+      y: (p.clientY - rect.top) * (canvas.height / rect.height)
+    };
+  }
+
+  function getShotFromPointer(p) {
+    const pullX = p.x - shooter.x;
+    const pullY = p.y - shooter.y;
+    const pullDistanceRaw = Math.hypot(pullX, pullY);
+
+    // 発射方向は「引いた方向の反対」。
+    // 角度は真上を0°、右を+、左を-として直接扱う。
+    let shotX = -pullX;
+    let shotY = -pullY;
+
+    if (pullDistanceRaw < 0.001) {
+      shotX = 0;
+      shotY = -1;
+    }
+
+    let offsetDeg = Math.atan2(shotX, -shotY) * 180 / Math.PI;
+    offsetDeg = clamp(offsetDeg, -CONFIG.aimLimitDeg, CONFIG.aimLimitDeg);
+
+    const offsetRad = offsetDeg * Math.PI / 180;
+    const dirX = Math.sin(offsetRad);
+    const dirY = -Math.cos(offsetRad);
+
+    const pullDistance = clamp(pullDistanceRaw, 0, CONFIG.dragMaxDistance);
+    const powerRatio = clamp(pullDistance / CONFIG.dragMaxDistance, 0, 1);
+    const curvedPower = Math.pow(powerRatio, CONFIG.shotPowerCurve);
+    const speed = CONFIG.shotPowerMin + (CONFIG.shotPowerMax - CONFIG.shotPowerMin) * curvedPower;
+
+    // 表示も必ず同じ発射方向の真逆に置く。
+    const handleX = shooter.x - dirX * pullDistance;
+    const handleY = shooter.y - dirY * pullDistance;
+
+    return { dirX, dirY, offsetDeg, speed, powerRatio, pullDistance, handleX, handleY };
+  }
+
+  function simulateTrajectory(shot, level) {
+    const r = CONFIG.radii[level];
+    let x = shooter.x + shot.dirX * (r + 18);
+    let y = shooter.y + shot.dirY * (r + 18);
+    let vx = shot.dirX * shot.speed;
+    let vy = shot.dirY * shot.speed;
+
+    const points = [];
+    const step = 0.34;
+
+    // ガイド長を引っ張り量に連動させる。
+    // 最大引っ張り時は従来の最長、弱い引っ張りでは約1/3まで短くする。
+    const guideRatio = CONFIG.guideMinLengthRatio + (1 - CONFIG.guideMinLengthRatio) * shot.powerRatio;
+    const guideSteps = Math.round(CONFIG.guideMaxSteps * guideRatio);
+
+    for (let i = 0; i < guideSteps; i++) {
+      x += vx * step;
+      y += vy * step;
+
+      vx *= Math.pow(CONFIG.activeFriction, step);
+      vy *= Math.pow(CONFIG.activeFriction, step);
+
+      const left = CONFIG.sidePadding + r;
+      const right = W - CONFIG.sidePadding - r;
+      const top = CONFIG.topPadding + r;
+      const bottom = H - CONFIG.bottomPadding - r;
+
+      if (x < left) {
+        x = left;
+        vx = Math.abs(vx) * CONFIG.activeWallRestitution;
+      }
+      if (x > right) {
+        x = right;
+        vx = -Math.abs(vx) * CONFIG.activeWallRestitution;
+      }
+      if (y < top) {
+        y = top;
+        vy = Math.abs(vy) * 0.08;
+        vx *= 0.72;
+      }
+      if (y > bottom) {
+        y = bottom;
+        vy = -Math.abs(vy) * CONFIG.activeWallRestitution;
+      }
+
+      if (i % 3 === 0) points.push({ x, y });
+
+      // 盤面オブジェクトに接触するあたりで予測線を止める
+      for (const o of objects) {
+        const dx = o.x - x;
+        const dy = o.y - y;
+        const min = o.r + r;
+        if (dx * dx + dy * dy <= min * min) {
+          points.push({ x, y });
+          return points;
+        }
+      }
+    }
+
+    return points;
+  }
+
+  function canShoot(now) {
+    return !gameOver && now - lastShotAt >= CONFIG.reloadTimeMs;
+  }
+
+  function startDrag(p) {
+    if (!canShoot(performance.now())) return;
+    drag = { x: p.x, y: p.y };
+  }
+
+  function updateDrag(p) {
+    if (!drag) return;
+    drag.x = p.x;
+    drag.y = p.y;
+  }
+
+  function endDrag() {
+    if (!drag) return;
+
+    const now = performance.now();
+    const shot = getShotFromPointer(drag);
+
+    if (shot.pullDistance < CONFIG.dragDeadZone || !canShoot(now)) {
+      drag = null;
+      return;
+    }
+
+    const r = CONFIG.radii[currentLevel];
+    const spawnX = shooter.x + shot.dirX * (r + 18);
+    const spawnY = shooter.y + shot.dirY * (r + 18);
+
+    const ball = makeBall({
+      level: currentLevel,
+      x: spawnX,
+      y: spawnY,
+      vx: shot.dirX * shot.speed,
+      vy: shot.dirY * shot.speed,
+      active: true
+    });
+
+    objects.push(ball);
+
+    lastShotTrace = {
+      x: spawnX,
+      y: spawnY,
+      dirX: shot.dirX,
+      dirY: shot.dirY,
+      offsetDeg: shot.offsetDeg,
+      bornAt: now
+    };
+
+    lastShotAt = now;
+    shots++;
+    currentLevel = nextLevel;
+    nextLevel = randomNextLevel();
+    drag = null;
+
+
+  }
+
+  function spawnNuisance(sideHint = null) {
+    const r = radiusFor(0, "nuisance");
+
+    // 地中で小さく発生し、最大サイズまで育ちながら局所的な地表まで登る。
+    // 左右位置はランダムだが、発射砲の近くは避ける。
+    const startScale = CONFIG.nuisanceGrowFromScale;
+    const startR = r * startScale;
+
+    let x = shooter.x;
+    let startY = 0;
+    let surfaceY = 0;
+    let releaseY = 0;
+
+    const minX = r + 18;
+    const maxX = W - r - 18;
+
+    for (let tries = 0; tries < 100; tries++) {
+      x = rand(minX, maxX);
+      const localGroundY = seabedArcY(x);
+      startY = localGroundY + CONFIG.nuisanceUndergroundDepth + startR;
+      surfaceY = localGroundY - r + CONFIG.nuisanceGroundContactOffset;
+      releaseY = surfaceY;
+
+      let ok = true;
+
+      if (Math.abs(x - shooter.x) < CONFIG.nuisanceHorizontalGap) {
+        ok = false;
+      }
+
+      if (ok) {
+        for (const o of objects) {
+          const dx = o.x - x;
+          const dy = o.y - releaseY;
+          const min = o.r + r + 8;
+          if (dx * dx + dy * dy < min * min) {
+            ok = false;
+            break;
+          }
+        }
+      }
+
+      if (ok) {
+        for (const p of pendingNuisances) {
+          const dx = p.x - x;
+          const dy = p.releaseY - releaseY;
+          const min = p.targetR + r + 18;
+          if (dx * dx + dy * dy < min * min) {
+            ok = false;
+            break;
+          }
+        }
+      }
+
+      if (ok) break;
+    }
+
+    pendingNuisances.push({
+      x,
+      startY,
+      surfaceY,
+      releaseY,
+      targetR: r,
+      bornAt: performance.now()
+    });
+  }
+
+  function spawnNuisanceWave(count) {
+    if (count <= 0) return;
+
+    // 数のルールはそのまま。配置だけ左右固定ではなくランダムにする。
+    for (let i = 0; i < count; i++) {
+      spawnNuisance();
+    }
+  }
+
+  function touchingCircles(x1, y1, r1, x2, y2, r2, extra = 0) {
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+    const rr = r1 + r2 + extra;
+    return dx * dx + dy * dy <= rr * rr;
+  }
+
+  function emitBurst(x, y, color, count = CONFIG.particleBurstCount, sizeScale = 1) {
+    const now = performance.now();
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (1.1 + Math.random() * 2.8) * sizeScale;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: CONFIG.particleLifetimeMs * (0.72 + Math.random() * 0.45),
+        bornAt: now,
+        size: (2.5 + Math.random() * 4.0) * sizeScale,
+        color,
+        type: "spark"
+      });
+    }
+
+    // 小さなリングも追加して「破裂感」を出す
+    particles.push({
+      x, y,
+      vx: 0,
+      vy: 0,
+      life: CONFIG.particleLifetimeMs * 0.82,
+      bornAt: now,
+      size: 8 * sizeScale,
+      color,
+      type: "ring"
+    });
+  }
+
+  function updateParticles(dt, now) {
+    const remain = [];
+    for (const p of particles) {
+      const age = now - p.bornAt;
+      if (age >= p.life) continue;
+
+      if (p.type === "spark") {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= Math.pow(0.965, dt);
+        p.vy *= Math.pow(0.965, dt);
+      }
+      remain.push(p);
+    }
+    particles = remain;
+  }
+
+  function drawParticles(now) {
+    for (const p of particles) {
+      const t = clamp((now - p.bornAt) / p.life, 0, 1);
+      const alpha = 1 - t;
+
+      if (p.type === "ring") {
+        const rr = p.size + t * 22;
+        ctx.save();
+        ctx.strokeStyle = `${p.color}${''}`;
+        ctx.globalAlpha = alpha * 0.65;
+        ctx.lineWidth = 2.2 * (1 - t * 0.45);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0.5, p.size * (1 - t * 0.55)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  function updateTimedNuisanceSpawns(now) {
+    if (!CONFIG.nuisanceEnabled) return;
+    if (waitingForNuisanceLaunch) return;
+    if (pendingNuisances.length > 0) return;
+
+    const elapsed = now - gameStartAt;
+
+    if (elapsed < CONFIG.nuisanceFirstSpawnAtMs) return;
+    if (elapsed < nextNuisanceWaveAt) return;
+
+    spawnNuisanceWave(CONFIG.nuisanceWaveCount);
+    waitingForNuisanceLaunch = true;
+  }
+
+  function wallCollide(o) {
+    const left = CONFIG.sidePadding + o.r;
+    const right = W - CONFIG.sidePadding - o.r;
+    const bottom = H - CONFIG.bottomPadding - o.r;
+
+    if (o.x < left) {
+      o.x = left;
+      o.vx = Math.abs(o.vx) * (o.active ? CONFIG.activeWallRestitution : CONFIG.wallRestitution);
+    }
+    if (o.x > right) {
+      o.x = right;
+      o.vx = -Math.abs(o.vx) * (o.active ? CONFIG.activeWallRestitution : CONFIG.wallRestitution);
+    }
+
+    // Curved top collision to match the visible arc.
+    const topSurfaceY = topArcY(o.x);
+    const topLimit = topSurfaceY + o.r;
+    if (o.y < topLimit) {
+      const n = topArcNormal(o.x);
+      const penetration = topLimit - o.y;
+
+      // Push out along the curved-surface normal
+      o.x += n.x * penetration;
+      o.y += n.y * penetration;
+
+      const vn = o.vx * n.x + o.vy * n.y;
+      if (vn < 0) {
+        if (o.active) {
+          const e = CONFIG.activeWallRestitution;
+          o.vx -= (1 + e) * vn * n.x;
+          o.vy -= (1 + e) * vn * n.y;
+        } else {
+          // Remove inward normal component but keep tangent movement
+          o.vx -= vn * n.x;
+          o.vy -= vn * n.y;
+
+          // 浮力が弧の天井に押し付けることで、接線方向の力に変換される。
+          // 水流ではなく、上に行こうとする力が状況を少し変えるための処理。
+          const half = (W - CONFIG.sidePadding * 2) / 2;
+          const slope = (2 * CONFIG.topArcDepth * fieldNx(o.x)) / half;
+          const tangentX = n.y;
+          const tangentY = -n.x;
+          const reliefSlide = CONFIG.topReliefSlideBoost * currentTopReliefLevel;
+          const buoyancySlide = -slope * (CONFIG.ceilingBuoyancySlideStrength + reliefSlide);
+
+          o.vx += tangentX * buoyancySlide;
+          o.vy += tangentY * buoyancySlide * 0.45;
+
+          // 壁との弱い摩擦。回転が天井の接線方向の動きに少し変換される。
+          const spinSlip = (o.angularVelocity || 0) * o.r;
+          const wallFriction = spinSlip * CONFIG.spinToMotionFriction;
+          o.vx += tangentX * wallFriction;
+          o.vy += tangentY * wallFriction * 0.45;
+          o.angularVelocity *= 0.992;
+
+          // 強すぎる上向き貼り付きだけ抑える。完全には殺さない。
+          o.vy = Math.max(o.vy, CONFIG.buoyancy * 0.55);
+          o.vy += CONFIG.ceilingContactDownBias;
+        }
+      }
+    }
+
+    if (o.y > bottom) {
+      o.y = bottom;
+      o.vy = -Math.abs(o.vy) * (o.active ? CONFIG.activeWallRestitution : CONFIG.wallRestitution);
+    }
+  }
+
+  function canMerge(a, b, now) {
+    if (a.type !== "normal" || b.type !== "normal") return false;
+    if (a.level !== b.level) return false;
+    if (a.marked || b.marked) return false;
+    if (now - a.lastMergedAt < CONFIG.mergeCooldownMs) return false;
+    if (now - b.lastMergedAt < CONFIG.mergeCooldownMs) return false;
+    return true;
+  }
+
+  function resolveCollision(a, b, now) {
+    if (a.marked || b.marked) return null;
+
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let d = Math.hypot(dx, dy);
+    let minDist = a.r + b.r;
+    const nuisanceContact = CONFIG.nuisanceSoftEnabled && (a.type === "nuisance" || b.type === "nuisance");
+
+    if (d <= 0.0001) {
+      dx = rand(-1, 1);
+      dy = rand(-1, 1);
+      d = Math.hypot(dx, dy);
+    }
+
+    if (d >= minDist) return null;
+
+    const nx = dx / d;
+    const ny = dy / d;
+    const overlap = minDist - d;
+
+    const rvx = b.vx - a.vx;
+    const rvy = b.vy - a.vy;
+    const velAlongNormal = rvx * nx + rvy * ny;
+    const impactSpeed = Math.max(0, -velAlongNormal);
+    const squashThreshold = CONFIG.squashImpactThreshold * (nuisanceContact ? CONFIG.nuisanceSoftImpactThresholdScale : 1);
+    const rawImpact = clamp((impactSpeed - squashThreshold) / 7.0, 0, 1);
+    const impact01 = Math.pow(rawImpact, CONFIG.squashPowerCurve);
+
+    if (canMerge(a, b, now)) {
+      return {
+        a, b,
+        x: a.x + nx * a.r,
+        y: a.y + ny * a.r
+      };
+    }
+
+    // 強い衝突時だけ、ほんの少しだけ「潰れて通れる」余地を作る。
+    // 遅い接触では compression = 0 なので、従来通り硬い球として当たる。
+    if (impact01 > 0 || nuisanceContact) {
+      const angle = Math.atan2(ny, nx);
+      const pressure01 = nuisanceContact ? clamp(overlap / Math.max(1, minDist * 0.16), 0, 1) : 0;
+      const nuisanceSoft01 = nuisanceContact ? clamp(impact01 * CONFIG.nuisanceSoftImpactCompressionScale + pressure01 * CONFIG.nuisanceSoftPressureCompressionScale, 0, 1) : 0;
+      const baseSquash = impact01 * CONFIG.squashMax;
+
+      const squashForA = nuisanceContact && a.type === "nuisance"
+        ? Math.min(CONFIG.nuisanceSoftVisualMax, baseSquash * CONFIG.nuisanceSoftVisualScale + pressure01 * CONFIG.nuisanceSoftVisualMax * 0.28)
+        : baseSquash * (nuisanceContact ? CONFIG.nuisanceSoftNormalVisualScale : 1);
+      const squashForB = nuisanceContact && b.type === "nuisance"
+        ? Math.min(CONFIG.nuisanceSoftVisualMax, baseSquash * CONFIG.nuisanceSoftVisualScale + pressure01 * CONFIG.nuisanceSoftVisualMax * 0.28)
+        : baseSquash * (nuisanceContact ? CONFIG.nuisanceSoftNormalVisualScale : 1);
+
+      if (squashForA > 0 && squashForA > (a.squash || 0)) {
+        a.squash = squashForA;
+        a.squashAngle = angle;
+        a.squashAt = now;
+      }
+      if (squashForB > 0 && squashForB > (b.squash || 0)) {
+        b.squash = squashForB;
+        b.squashAngle = angle;
+        b.squashAt = now;
+      }
+
+      const normalCompression = CONFIG.collisionCompressionMax * impact01;
+      const nuisanceCompression = nuisanceContact ? CONFIG.nuisanceSoftExtraCompression * nuisanceSoft01 : 0;
+      const compression = normalCompression + nuisanceCompression;
+      const compressedMinDist = minDist * (1 - compression);
+
+      // 実際の円同士は触れているが、強打やお邪魔バブルの微圧縮ぶんの範囲内なら、
+      // 反発させずに少しだけ速度を吸って通過/食い込みを許す。
+      // お邪魔バブルはここで「硬い壁」ではなく、薄く凹むクッションとして働く。
+      if (compression > 0 && d >= compressedMinDist) {
+        const dampBase = nuisanceContact ? CONFIG.nuisanceSoftPassDamping : CONFIG.compressionPassDamping;
+        const damp = Math.pow(dampBase, Math.max(impact01, nuisanceSoft01));
+        a.vx *= damp;
+        a.vy *= damp;
+        b.vx *= damp;
+        b.vy *= damp;
+        return null;
+      }
+    }
+
+    // 発射中の弾が十分深く盤面に触れたら、その時点でツムランド的に盤面側へ入れる。
+    if (a.active || b.active) {
+      a.active = false;
+      b.active = false;
+    }
+
+    const totalMass = a.mass + b.mass;
+    const aShare = b.mass / totalMass;
+    const bShare = a.mass / totalMass;
+
+    a.x -= nx * overlap * aShare;
+    a.y -= ny * overlap * aShare;
+    b.x += nx * overlap * bShare;
+    b.y += ny * overlap * bShare;
+
+    if (velAlongNormal < 0) {
+      // 強い衝突ほど反発係数を下げる。
+      // 弱い接触は従来通り、強打だけ跳ね返りを抑えて潰れ/通過感を出す。
+      const e = CONFIG.objectRestitution * (nuisanceContact ? CONFIG.nuisanceSoftRestitutionScale : 1) * (1 - CONFIG.highImpactRestitutionReduction * impact01);
+      const j = -(1 + e) * velAlongNormal / (1 / a.mass + 1 / b.mass);
+      const ix = j * nx;
+      const iy = j * ny;
+
+      a.vx -= ix / a.mass;
+      a.vy -= iy / a.mass;
+      b.vx += ix / b.mass;
+      b.vy += iy / b.mass;
+
+      // 強い衝突だけ反発を少し吸収。弱い接触や静止密着では吸収しない。
+      if (impact01 > 0) {
+        const absorb = 1 - (CONFIG.collisionAbsorption + (nuisanceContact ? CONFIG.nuisanceSoftAbsorption : 0)) * impact01;
+        a.vx *= absorb;
+        a.vy *= absorb;
+        b.vx *= absorb;
+        b.vy *= absorb;
+      }
+    }
+
+    // 接触摩擦：回転をほんの少しだけ接線方向の動きへ変換する。
+    // 円形でも、摩擦があれば回転が盤面のまぎれに繋がる。
+    const tx = -ny;
+    const ty = nx;
+    const relTangent = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty;
+    const surfaceSpin = (b.angularVelocity || 0) * b.r + (a.angularVelocity || 0) * a.r;
+    const tangentSlip = relTangent + surfaceSpin;
+
+    if (Math.abs(tangentSlip) > 0.0001) {
+      const frictionScale = CONFIG.contactFriction + CONFIG.spinToMotionFriction * clamp(Math.abs(surfaceSpin) / 1.2, 0, 1);
+      const jt = -tangentSlip * frictionScale / (1 / a.mass + 1 / b.mass);
+
+      a.vx -= (jt * tx) / a.mass;
+      a.vy -= (jt * ty) / a.mass;
+      b.vx += (jt * tx) / b.mass;
+      b.vy += (jt * ty) / b.mass;
+
+      // Translation/contact also changes rotation a little.
+      const inertiaA = Math.max(1, 0.5 * a.mass * a.r * a.r);
+      const inertiaB = Math.max(1, 0.5 * b.mass * b.r * b.r);
+      a.angularVelocity -= (jt * a.r) / inertiaA;
+      b.angularVelocity += (jt * b.r) / inertiaB;
+      a.angularVelocity = clamp(a.angularVelocity, -CONFIG.maxAngularVelocity, CONFIG.maxAngularVelocity);
+      b.angularVelocity = clamp(b.angularVelocity, -CONFIG.maxAngularVelocity, CONFIG.maxAngularVelocity);
+    }
+
+    return null;
+  }
+
+  function mergePair(pair, now) {
+    const { a, b } = pair;
+    if (a.marked || b.marked) return;
+
+    const oldLevel = a.level;
+    const x = pair.x || (a.x + b.x) / 2;
+    const y = pair.y || (a.y + b.y) / 2;
+
+    a.marked = true;
+    b.marked = true;
+
+    // 合体そのものの破裂パーティクル
+    emitBurst(x, y, colors[Math.min(oldLevel + 1, CONFIG.maxLevel)] || "#ffffff", 18, 1.0);
+
+    if (oldLevel >= CONFIG.maxLevel && CONFIG.maxLevelMergeClears) {
+      emitBurst(x, y, "#ffffff", 26, 1.35);
+      score += CONFIG.maxLevelBonusScore || scoreForMergedLevel(CONFIG.maxLevel);
+      updateHighScore();
+      return;
+    }
+
+    const newLevel = Math.min(CONFIG.maxLevel, oldLevel + 1);
+
+    const merged = makeBall({
+      level: newLevel,
+      x,
+      y,
+      vx: (a.vx + b.vx) * 0.12,
+      vy: Math.min((a.vy + b.vy) * 0.12, -0.5),
+      active: false
+    });
+
+    merged.angularVelocity += clamp((a.vx - b.vx) * 0.0008, -0.006, 0.006);
+    merged.lastMergedAt = now;
+    objects.push(merged);
+
+    score += scoreForMergedLevel(newLevel);
+    updateHighScore();
+
+    // 以前は「合体後の merged 1個との厳密接触」しか見ていなかったため、
+    // 片方の親には触れていても消えないことがあった。
+    // 今回は parent A / parent B / merged のいずれかに触れていれば消す。
+    for (const o of objects) {
+      if (o.type !== "nuisance" || o.marked) continue;
+
+      const touchedA = touchingCircles(o.x, o.y, o.r, a.x, a.y, a.r, CONFIG.nuisancePopTolerance);
+      const touchedB = touchingCircles(o.x, o.y, o.r, b.x, b.y, b.r, CONFIG.nuisancePopTolerance);
+      const touchedMerged = touchingCircles(o.x, o.y, o.r, merged.x, merged.y, merged.r, CONFIG.nuisancePopTolerance);
+
+      if (touchedA || touchedB || touchedMerged) {
+        o.marked = true;
+        score += 5;
+        updateHighScore();
+        emitBurst(o.x, o.y, "rgba(190,235,255,1)", 14, 0.95);
+      }
+    }
+
+    // v60: 合体時の軽い周囲衝撃。
+    // スイカゲームのような「合体したら周りが少し崩れて連鎖する」余地を作る。
+    for (const o of objects) {
+      if (o === merged || o.marked) continue;
+      const dx = o.x - x;
+      const dy = o.y - y;
+      const d = Math.hypot(dx, dy);
+      if (d <= 0 || d >= CONFIG.mergeImpulseRadius) continue;
+
+      const nx = dx / d;
+      const ny = dy / d;
+      const closeness = 1 - d / CONFIG.mergeImpulseRadius;
+      const falloff = closeness * closeness * (3 - 2 * closeness);
+      const typeScale = o.type === "nuisance" ? CONFIG.mergeImpulseNuisanceScale : 1;
+      const levelScale = clamp(merged.r / Math.max(1, o.r), 0.55, 1.35);
+      const f = Math.max(CONFIG.mergeImpulseMinStrength, CONFIG.mergeImpulseStrength * falloff * typeScale * levelScale);
+
+      o.vx += nx * f;
+      // 少しだけ上向きに寄せる。単なる爆発ではなく、浮力のある盤面がほぐれる方向。
+      o.vy += ny * f - CONFIG.mergeImpulseVerticalBias * falloff;
+      o.angularVelocity += clamp(nx * CONFIG.mergeImpulseAngularStrength * falloff, -CONFIG.maxAngularVelocity, CONFIG.maxAngularVelocity);
+
+      o.squash = Math.max(o.squash || 0, 0.035 + falloff * 0.055);
+      o.squashAt = now;
+    }
+  }
+
+  function updatePendingNuisances(now) {
+    const remaining = [];
+    let launchedThisFrame = false;
+
+    for (const p of pendingNuisances) {
+      const age = now - p.bornAt;
+      if (age >= CONFIG.nuisanceTelegraphMs) {
+        const m = getPendingNuisanceMotion(p, now);
+        objects.push(makeBall({
+          level: 0,
+          type: "nuisance",
+          x: m.x,
+          y: m.y,
+          vx: rand(-0.12, 0.12),
+          // 地表で一瞬停止したあと、ここから上に浮かぶ
+          vy: m.liftVy,
+          active: false
+        }));
+        launchedThisFrame = true;
+      } else {
+        remaining.push(p);
+      }
+    }
+
+    pendingNuisances = remaining;
+
+    // 次の発生間隔は、放出タイミングから数える。
+    if (launchedThisFrame) {
+      const elapsed = now - gameStartAt;
+      const interval = elapsed >= CONFIG.nuisanceFastIntervalStartMs
+        ? CONFIG.nuisanceFastIntervalAfterLaunchMs
+        : CONFIG.nuisanceSlowIntervalAfterLaunchMs;
+
+      nextNuisanceWaveAt = elapsed + interval;
+      waitingForNuisanceLaunch = false;
+    }
+  }
+
+  function computeTopRelief(now) {
+    let count = 0;
+    let speedSum = 0;
+
+    for (const o of objects) {
+      if (o.marked || o.active) continue;
+      const topDepth = (topArcY(o.x) + CONFIG.topReliefZone) - o.y;
+      if (topDepth <= 0) continue;
+      count++;
+      speedSum += Math.hypot(o.vx, o.vy);
+    }
+
+    if (count < CONFIG.topReliefCountThreshold) return { level: 0, count, avgSpeed: 0 };
+
+    const avgSpeed = speedSum / Math.max(1, count);
+    const stillness = clamp(1 - avgSpeed / CONFIG.topReliefStillSpeedThreshold, 0, 1);
+    const crowd = clamp((count - CONFIG.topReliefCountThreshold) / Math.max(1, CONFIG.topReliefMaxObjectsForFullBoost - CONFIG.topReliefCountThreshold), 0, 1);
+    const calmAfterShot = clamp((now - lastShotAt - CONFIG.stuckDriftDelayMs) / 1600, 0, 1);
+
+    return {
+      level: stillness * (0.45 + crowd * 0.55) * calmAfterShot,
+      count,
+      avgSpeed
+    };
+  }
+
+  function applySameLevelMergeAssist(stepDt, now) {
+    const calm = clamp((now - lastShotAt - CONFIG.sameLevelMergeAssistDelayMs) / 1200, 0, 1);
+    if (calm <= 0) return;
+
+    for (let i = 0; i < objects.length; i++) {
+      const a = objects[i];
+      if (a.marked || a.active || a.type !== "normal") continue;
+
+      for (let j = i + 1; j < objects.length; j++) {
+        const b = objects[j];
+        if (b.marked || b.active || b.type !== "normal") continue;
+        if (a.level !== b.level) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy);
+        if (d <= 0.0001) continue;
+
+        const minDist = a.r + b.r;
+        const gap = d - minDist;
+
+        // Already touching: collision system will merge them.
+        // Assist only when they are close but not yet touching.
+        if (gap <= 0 || gap > CONFIG.sameLevelMergeAssistRange) continue;
+
+        const speedA = Math.hypot(a.vx, a.vy);
+        const speedB = Math.hypot(b.vx, b.vy);
+        if (Math.max(speedA, speedB) > CONFIG.sameLevelMergeAssistMaxSpeed) continue;
+
+        const nx = dx / d;
+        const ny = dy / d;
+        const closeness = 1 - gap / CONFIG.sameLevelMergeAssistRange;
+
+        // 上端近くの膠着では少し強めに効かせる。
+        const topA = clamp((topArcY(a.x) + CONFIG.topCurrentBand - a.y) / CONFIG.topCurrentBand, 0, 1);
+        const topB = clamp((topArcY(b.x) + CONFIG.topCurrentBand - b.y) / CONFIG.topCurrentBand, 0, 1);
+        const topBoost = 1 + Math.max(topA, topB) * CONFIG.sameLevelMergeAssistTopBoost;
+
+        const force = CONFIG.sameLevelMergeAssistStrength * closeness * closeness * calm * topBoost * stepDt;
+
+        // Mass-aware pull so a tiny object doesn't unrealistically drag a huge one too much.
+        const totalMass = a.mass + b.mass;
+        const aShare = b.mass / totalMass;
+        const bShare = a.mass / totalMass;
+
+        a.vx += nx * force * aShare;
+        a.vy += ny * force * aShare;
+        b.vx -= nx * force * bShare;
+        b.vy -= ny * force * bShare;
+      }
+    }
+  }
+
+  function updateGame(dt, now) {
+    if (gameOver) return;
+
+    for (const o of objects) {
+      if (now - (o.squashAt || -9999) > CONFIG.squashVisibleMs) {
+        o.squash = 0;
+      } else {
+        o.squash *= Math.pow(CONFIG.squashRecover, dt);
+        if (o.squash < 0.002) o.squash = 0;
+      }
+    }
+
+    updateAmbientBubbles(dt, now);
+    updateTimedNuisanceSpawns(now);
+    updatePendingNuisances(now);
+    updateParticles(dt, now);
+
+    const substeps = CONFIG.physicsSubsteps;
+    const stepDt = dt / substeps;
+    const topRelief = computeTopRelief(now);
+    currentTopReliefLevel = topRelief.level;
+
+    for (let step = 0; step < substeps; step++) {
+      for (const o of objects) {
+        if (o.active) {
+          // ツムランド寄せ：
+          // 発射中はガイド通り。浮力なし。速度の大きさだけ徐々に減る。
+          o.x += o.vx * stepDt;
+          o.y += o.vy * stepDt;
+
+          o.vx *= Math.pow(CONFIG.activeFriction, stepDt);
+          o.vy *= Math.pow(CONFIG.activeFriction, stepDt);
+
+          const speed = Math.hypot(o.vx, o.vy);
+          o.angle += (o.angularVelocity + speed * CONFIG.activeSpinMultiplier * Math.sign(o.vx || 1)) * stepDt;
+          o.angularVelocity *= Math.pow(CONFIG.angularDamping, stepDt);
+          const age = now - o.bornAt;
+
+          if (speed < CONFIG.activeStopSpeed || age > CONFIG.activeMaxAgeMs) {
+            o.active = false;
+          }
+        } else {
+          // 盤面に入った泡だけ、上へ浮いて天井側に溜まる。
+          o.vy += CONFIG.buoyancy * stepDt;
+          o.vy = Math.max(o.vy, CONFIG.maxUpSpeed);
+
+          // 完全に膠着しないよう、ごく弱い流れと回転を与える。
+          // 円形コリジョンでは見た目の回転だけでは状況が変わらないため、
+          // 微小な速度変化も入れて接触関係が少しずつ変わるようにする。
+          if (CONFIG.idleMotionEnabled) {
+            const phase = now * CONFIG.idleMotionSpeed + o.id * 1.618;
+            o.vx += Math.sin(phase) * CONFIG.idleDriftStrength * stepDt;
+            o.vy += Math.cos(phase * 0.73) * CONFIG.idleVerticalDriftStrength * stepDt;
+            o.angularVelocity += Math.sin(phase * 0.41) * CONFIG.idleSpinStrength * 0.025 * stepDt;
+
+            // 左右ランダムにゆっくり回り続ける。完全に止まると盤面が固まりやすい。
+            const spinPhase = now * 0.00065 + o.id * 2.731;
+            o.angularVelocity += Math.sin(spinPhase) * CONFIG.idleSpinBiasStrength * stepDt;
+            o.angularVelocity = clamp(o.angularVelocity, -CONFIG.maxAngularVelocity, CONFIG.maxAngularVelocity);
+          }
+
+          o.angularVelocity *= Math.pow(CONFIG.angularDamping, stepDt);
+
+          // 上端付近はスイカゲームの「待っていると少し状況が変わる」まぎれを作る。
+          // ただし全体が暴れないよう、上端に近いほど・最後のショットから時間が経つほど効く。
+          const topPressure = clamp((topArcY(o.x) + CONFIG.topCurrentBand - o.y) / CONFIG.topCurrentBand, 0, 1);
+          if (topPressure > 0) {
+            const calmAfterShot = clamp((now - lastShotAt - CONFIG.stuckDriftDelayMs) / 1400, 0, 1);
+            const flowPhase = now * CONFIG.topCurrentSpeed + o.id * 1.371 + o.level * 0.27;
+            const surfaceWave = Math.sin(flowPhase) + Math.sin(flowPhase * 0.47 + 2.1) * 0.42;
+
+            o.vx += surfaceWave * CONFIG.topCurrentStrength * topPressure * (0.35 + calmAfterShot * 0.65) * stepDt;
+            o.vy += Math.cos(flowPhase * 0.82) * CONFIG.topCurrentVerticalStrength * topPressure * calmAfterShot * stepDt;
+
+            // Also drift a bit along the curved ceiling from center toward sides
+            o.vx += fieldNx(o.x) * 0.004 * topPressure * (0.45 + calmAfterShot * 0.55) * stepDt;
+
+            const speed = Math.hypot(o.vx, o.vy);
+            if (calmAfterShot > 0 && speed < CONFIG.stuckSpeedThreshold) {
+              const unstickPhase = now * 0.0031 + o.id * 2.417;
+              o.vx += Math.sin(unstickPhase) * CONFIG.stuckUnstickStrength * topPressure * calmAfterShot * stepDt;
+              o.vy += Math.cos(unstickPhase * 0.73) * CONFIG.stuckUnstickStrength * 0.32 * topPressure * calmAfterShot * stepDt;
+            }
+
+            // v60: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
+            // 常時水流ではなく、詰まり時の「まぎれ」用。
+            if (currentTopReliefLevel > 0) {
+              const reliefPhase = now * 0.0024 + o.id * 2.113;
+              const reliefWave = Math.sin(reliefPhase) + Math.sin(reliefPhase * 0.51 + 1.7) * 0.35;
+              o.vx += reliefWave * CONFIG.topReliefUnstickBoost * topPressure * currentTopReliefLevel * stepDt;
+              o.angularVelocity += reliefWave * CONFIG.idleSpinStrength * 0.05 * topPressure * currentTopReliefLevel * stepDt;
+              o.angularVelocity = clamp(o.angularVelocity, -CONFIG.maxAngularVelocity, CONFIG.maxAngularVelocity);
+            }
+          }
+
+          o.angle += o.angularVelocity * stepDt;
+
+          o.x += o.vx * stepDt;
+          o.y += o.vy * stepDt;
+
+          o.vx *= Math.pow(CONFIG.damping, stepDt);
+          o.vy *= Math.pow(CONFIG.damping, stepDt);
+
+          // 完全停止させない。極小速度は残して、盤面が少しずつ動く余地を作る。
+          if (!CONFIG.idleMotionEnabled && Math.abs(o.vx) < 0.015) o.vx = 0;
+        }
+
+        wallCollide(o);
+      }
+
+      applySameLevelMergeAssist(stepDt, now);
+
+      const mergePairs = [];
+      for (let iter = 0; iter < CONFIG.collisionIterations; iter++) {
+        for (let i = 0; i < objects.length; i++) {
+          for (let j = i + 1; j < objects.length; j++) {
+            const pair = resolveCollision(objects[i], objects[j], now);
+            if (pair) {
+              mergePairs.push(pair);
+            } else {
+              const a = objects[i];
+              const b = objects[j];
+              if (!a.marked && !b.marked && !a.active && !b.active && canMerge(a, b, now)) {
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const d = Math.hypot(dx, dy);
+                const almostTouching = d > 0 && d < a.r + b.r + 1.1;
+                const slowEnough = Math.max(Math.hypot(a.vx, a.vy), Math.hypot(b.vx, b.vy)) < CONFIG.sameLevelMergeAssistMaxSpeed;
+                if (almostTouching && slowEnough) {
+                  mergePairs.push({
+                    a, b,
+                    x: (a.x + b.x) / 2,
+                    y: (a.y + b.y) / 2
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      for (const pair of mergePairs) {
+        mergePair(pair, now);
+      }
+
+      objects = objects.filter(o => !o.marked);
+    }
+
+    checkGameOver(now);
+  }
+
+  function checkGameOver(now) {
+    const touchingNow = [];
+
+    for (const o of objects) {
+      const age = now - o.bornAt;
+      const oldEnough = age > 500;
+
+      // お邪魔バブルは地面から生える演出なので、
+      // 出現直後だけトゲ判定を無効化する。
+      // 盤面へ浮き上がった後に押し戻されてトゲに触れた場合はアウト。
+      const nuisanceSpawnGrace = o.type === "nuisance" && age < CONFIG.nuisanceSpawnSpikeGraceMs;
+
+      // 地面に触れた瞬間にゲームオーバー。
+      // 発射直後だけは誤判定回避のため短い猶予を残す。
+      const hitSeabed = oldEnough && !nuisanceSpawnGrace && (o.y + o.r >= seabedSpikeY(o.x));
+
+      if (hitSeabed) {
+        touchingNow.push(o.id);
+      }
+    }
+
+    if (touchingNow.length > 0) {
+      gameOver = true;
+      gameOverAt = now;
+      gameEndElapsedMs = Math.max(0, now - gameStartAt);
+      gameOverTouchedIds = touchingNow.slice();
+      return;
+    }
+  }
+
+  function drawBackground() {
+    ctx.clearRect(0, 0, W, H);
+    const hudNow = performance.now();
+    const timeText = formatHudTime(getElapsedPlayMs(hudNow));
+
+    // HUD
+    ctx.save();
+    ctx.fillStyle = "rgba(9,14,28,.92)";
+    roundRect(12, 12, W - 24, CONFIG.hudHeight - 18, 18, true);
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    ctx.lineWidth = 1.5;
+    roundRect(12, 12, W - 24, CONFIG.hudHeight - 18, 18, false);
+
+    // LEFT: TIME
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,.58)";
+    ctx.font = "10px system-ui";
+    ctx.fillText("TIME", 28, 32);
+
+    ctx.fillStyle = "rgba(190,235,255,.96)";
+    ctx.font = "700 20px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(timeText, 28, 58);
+
+    // CENTER: SCORE
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,.58)";
+    ctx.font = "11px system-ui";
+    ctx.fillText("SCORE", W / 2, 32);
+
+    ctx.fillStyle = "rgba(255,255,255,.98)";
+    ctx.font = "800 34px system-ui";
+    ctx.fillText(String(score), W / 2, 64);
+
+    // RIGHT: HIGH SCORE
+    ctx.textAlign = "right";
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.font = "10px system-ui";
+    ctx.fillText("HIGH", W - 28, 32);
+
+    ctx.fillStyle = "rgba(255,230,160,.96)";
+    ctx.font = "700 18px system-ui";
+    ctx.fillText(String(highScore), W - 28, 58);
+    ctx.restore();
+
+    // Play field tint
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.035)";
+    roundRect(18, CONFIG.topPadding - CONFIG.topArcDepth - 8, W - 36, H - CONFIG.topPadding + CONFIG.topArcDepth - 22, 18, true);
+    ctx.restore();
+
+    // Ambient background bubbles
+    drawAmbientBubbles(hudNow);
+
+    // Side walls
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(CONFIG.sidePadding, topArcY(CONFIG.sidePadding));
+    ctx.lineTo(CONFIG.sidePadding, H - CONFIG.bottomPadding);
+    ctx.moveTo(W - CONFIG.sidePadding, topArcY(W - CONFIG.sidePadding));
+    ctx.lineTo(W - CONFIG.sidePadding, H - CONFIG.bottomPadding);
+    ctx.stroke();
+
+    // Top arc: center rises
+    ctx.beginPath();
+    for (let x = CONFIG.sidePadding; x <= W - CONFIG.sidePadding; x += 8) {
+      const y = topArcY(x);
+      if (x === CONFIG.sidePadding) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Seabed and spikes
+    ctx.save();
+    const overPulse = gameOver && gameOverAt != null ? (0.5 + 0.5 * Math.sin((hudNow - gameOverAt) * 0.04)) : 0;
+
+    const grd = ctx.createLinearGradient(0, seabedY - CONFIG.seabedArcHeight, 0, H);
+    grd.addColorStop(0, "rgba(160,115,70,.92)");
+    grd.addColorStop(0.4, "rgba(120,82,48,.96)");
+    grd.addColorStop(1, "rgba(84,58,36,.98)");
+    ctx.fillStyle = grd;
+
+    // Ground body
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, seabedArcY(0) + 10);
+    for (let x = 0; x <= W; x += 20) {
+      const yy = seabedArcY(x) + Math.sin(x * 0.042) * 4.2 + Math.cos(x * 0.08) * 2.0;
+      ctx.lineTo(x, yy);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Spike fill
+    ctx.beginPath();
+    ctx.moveTo(0, seabedArcY(0) + CONFIG.spikeBaseOffset + 2);
+    for (let x = 0; x <= W; x += 6) {
+      ctx.lineTo(x, seabedSpikeY(x));
+    }
+    ctx.lineTo(W, seabedArcY(W) + CONFIG.spikeBaseOffset + 2);
+    for (let x = W; x >= 0; x -= 8) {
+      ctx.lineTo(x, seabedArcY(x) + CONFIG.spikeBaseOffset + 2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = gameOver ? `rgba(205,90,76,${0.78 + overPulse * 0.14})` : "rgba(160,105,88,.88)";
+    ctx.fill();
+
+    // Spike outline / danger line
+    ctx.strokeStyle = gameOver
+      ? `rgba(255,120,90,${0.76 + overPulse * 0.24})`
+      : "rgba(255,170,120,.95)";
+    ctx.lineWidth = gameOver ? 4.8 : 3.2;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 6) {
+      const y = seabedSpikeY(x);
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Sand dots
+    for (let x = 18; x < W - 10; x += 22) {
+      const gy = seabedArcY(x);
+      const y = gy + 12 + ((x * 13) % 18);
+      ctx.fillStyle = "rgba(225,205,165,.16)";
+      ctx.beginPath();
+      ctx.arc(x, y, 1.6 + ((x * 7) % 7) * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Seaweed
+    ctx.strokeStyle = "rgba(52,110,84,.55)";
+    ctx.lineWidth = 3;
+    for (const x of [34, 72, 318, 350]) {
+      const gy = seabedArcY(x);
+      ctx.beginPath();
+      ctx.moveTo(x, H - 8);
+      ctx.quadraticCurveTo(x - 5, gy + 36, x + 4, gy + 18);
+      ctx.quadraticCurveTo(x + 10, gy - 2, x - 2, gy - 22);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = gameOver ? "rgba(255,170,140,.98)" : "rgba(255,210,170,.95)";
+    ctx.font = "12px system-ui";
+    ctx.textAlign = "left";
+    ctx.fillText("SPIKES  —  touch here = game over", 24, seabedSpikeY(24) - 12);
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.font = "12px system-ui";
+    ctx.textAlign = "left";
+    ctx.fillText(`shots ${shots}`, 24, CONFIG.topPadding + 18);
+  }
+
+  function getPendingNuisanceMotion(p, now) {
+    const elapsed = now - p.bornAt;
+    const t = clamp(elapsed / CONFIG.nuisanceTelegraphMs, 0, 1);
+
+    const growMs = Math.max(1, CONFIG.nuisanceTelegraphMs - CONFIG.nuisanceSurfacePauseMs);
+    const growT = clamp(elapsed / growMs, 0, 1);
+    const ease = 1 - Math.pow(1 - growT, 3);
+
+    // 地中から地表まで登る間に、最大サイズまで育つ
+    const r = p.targetR * (CONFIG.nuisanceGrowFromScale + (1 - CONFIG.nuisanceGrowFromScale) * ease);
+    const y = p.startY + (p.surfaceY - p.startY) * ease;
+
+    return {
+      t,
+      growT,
+      r,
+      x: p.x,
+      y,
+      liftVy: CONFIG.nuisancePreviewLiftSpeed,
+      isSurfacePause: elapsed >= growMs
+    };
+  }
+
+  function drawPendingNuisance(p, now) {
+    const m = getPendingNuisanceMotion(p, now);
+    const t = m.t;
+    const r = m.r;
+    const localGroundY = seabedArcY(m.x);
+
+    const jxBase = Math.sin(now * 0.032 + p.x * 0.1) * CONFIG.nuisanceTelegraphJitter;
+    const jyBase = Math.cos(now * 0.029 + p.x * 0.07) * CONFIG.nuisanceTelegraphJitter * 0.16;
+
+    const x = m.x + jxBase * (0.16 + t * 0.42);
+    const y = m.y + (m.isSurfacePause ? jyBase * 0.35 : jyBase);
+
+    ctx.save();
+
+    const grd = ctx.createRadialGradient(x - r * .35, y - r * .45, r * .12, x, y, r);
+    grd.addColorStop(0, "rgba(255,255,255,.96)");
+    grd.addColorStop(0.35, "rgba(170,220,255,.78)");
+    grd.addColorStop(1, "rgba(90,140,210,.28)");
+
+    ctx.fillStyle = grd;
+    ctx.strokeStyle = `rgba(210,240,255,${0.24 + t * 0.46})`;
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 地中から湧き出て、地表に達するまで砂の盛り上がりを見せる
+    if (m.growT < 1 || y + r > localGroundY - 4) {
+      ctx.fillStyle = "rgba(230,210,170,.16)";
+      ctx.beginPath();
+      ctx.ellipse(x, localGroundY + 2, Math.max(8, r * 0.8), Math.max(2, r * 0.18), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 小さな泡の白ハイライト
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    ctx.beginPath();
+    ctx.arc(x - r * .3, y - r * .3, Math.max(1.8, r * .16), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawBall(o) {
+    ctx.save();
+
+    const shake = getGameOverShake(o, performance.now());
+    const x = o.x + shake.dx;
+    const y = o.y + shake.dy;
+    const angle = o.angle + shake.da;
+    const squashAge = performance.now() - (o.squashAt || -9999);
+    let squash = 0;
+    if (squashAge >= 0 && squashAge <= CONFIG.squashVisibleMs) {
+      const decay = Math.exp(-squashAge / 95);
+      const snap = 0.82 + 0.18 * Math.cos(squashAge * 0.055);
+      const squashLimit = o.type === "nuisance" ? CONFIG.nuisanceSoftVisualMax : CONFIG.squashMax;
+      squash = clamp((o.squash || 0) * decay * snap, 0, squashLimit) * (gameOver ? 0.35 : 1);
+    }
+    if (squash < 0.006) squash = 0;
+    const squashAngle = o.squashAngle || 0;
+
+    ctx.translate(x, y);
+    ctx.rotate(squashAngle);
+    ctx.scale(1 + squash * 0.62, 1 - squash);
+    ctx.rotate(-squashAngle);
+
+    if (o.type === "nuisance") {
+      const grd = ctx.createRadialGradient(-o.r * .35, -o.r * .45, o.r * .12, 0, 0, o.r);
+      grd.addColorStop(0, "rgba(255,255,255,.95)");
+      grd.addColorStop(0.35, "rgba(170,220,255,.72)");
+      grd.addColorStop(1, "rgba(90,140,210,.45)");
+
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = gameOverTouchedIds.includes(o.id) && gameOver ? "rgba(255,230,230,.95)" : "rgba(210,240,255,.8)";
+      ctx.lineWidth = gameOverTouchedIds.includes(o.id) && gameOver ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,.75)";
+      ctx.beginPath();
+      ctx.arc(-o.r * .35, -o.r * .35, o.r * .16, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.rotate(angle);
+      ctx.scale(shake.scale, shake.scale);
+      ctx.strokeStyle = "rgba(255,255,255,.42)";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r * .66, -0.7, 0.9);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, o.r * .42, 2.3, 3.1);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.restore();
+      return;
+    }
+
+    const grd = ctx.createRadialGradient(-o.r * .35, -o.r * .38, o.r * .18, 0, 0, o.r);
+    grd.addColorStop(0, "#ffffff");
+    grd.addColorStop(0.18, colors[o.level]);
+    grd.addColorStop(1, shade(colors[o.level], -32));
+
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(0, 0, o.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    const touched = gameOver && gameOverTouchedIds.includes(o.id);
+    ctx.strokeStyle = touched ? "rgba(255,235,235,.98)" : (o.active ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.66)");
+    ctx.lineWidth = touched ? 4.5 : (o.active ? 4 : 2);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.rotate(angle);
+    ctx.scale(shake.scale, shake.scale);
+    ctx.strokeStyle = "rgba(255,255,255,.26)";
+    ctx.lineWidth = Math.max(1.5, o.r * 0.045);
+    ctx.beginPath();
+    ctx.arc(0, 0, o.r * .68, -0.85, 0.85);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, o.r * .43, 2.15, 3.05);
+    ctx.stroke();
+
+    // モックでは数字も中の絵として扱い、回転が分かるよう一緒に回す。
+    const label = labels[o.level];
+    const fontSize = Math.max(12, o.r * 0.58);
+
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.font = `700 ${fontSize}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 0, 1);
+
+    // 6 と 9 は下に短い横線を付けて判別しやすくする
+    if (label === "6" || label === "9") {
+      const markerW = fontSize * 0.42;
+      const markerY = fontSize * 0.36;
+      ctx.strokeStyle = "rgba(0,0,0,.55)";
+      ctx.lineWidth = Math.max(1.6, fontSize * 0.075);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-markerW * 0.5, markerY);
+      ctx.lineTo(markerW * 0.5, markerY);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function drawShooter(now) {
+    const ready = canShoot(now);
+    let shot = {
+      dirX: 0,
+      dirY: -1,
+      offsetDeg: 0,
+      speed: CONFIG.shotPowerMin,
+      powerRatio: 0,
+      pullDistance: 0,
+      handleX: shooter.x,
+      handleY: shooter.y + 1
+    };
+
+    if (drag) {
+      shot = getShotFromPointer(drag);
+
+      ctx.save();
+
+      // スリング線。必ず実発射方向の真逆。
+      ctx.strokeStyle = "rgba(255,255,255,.45)";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(shooter.x, shooter.y);
+      ctx.lineTo(shot.handleX, shot.handleY);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,.18)";
+      ctx.beginPath();
+      ctx.arc(shot.handleX, shot.handleY, 18 + 14 * shot.powerRatio, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    if (drag && ready) {
+      const path = simulateTrajectory(shot, currentLevel);
+
+      ctx.save();
+
+      // 初速方向。これが発射直後の角度。
+      ctx.strokeStyle = "rgba(255,255,255,.92)";
+      ctx.lineWidth = 4 + shot.powerRatio * 4;
+      const solidGuideEnd = 52 + shot.powerRatio * 32;
+      ctx.beginPath();
+      ctx.moveTo(shooter.x + shot.dirX * 30, shooter.y + shot.dirY * 30);
+      ctx.lineTo(shooter.x + shot.dirX * solidGuideEnd, shooter.y + shot.dirY * solidGuideEnd);
+      ctx.stroke();
+
+      // 実際の発射中ロジックと同じ予測点。
+      // ただし見えすぎないよう、画面中央付近でフェードアウトする。
+      for (let i = 0; i < path.length; i++) {
+        const p = path[i];
+
+        let fade = 1;
+        if (p.y <= CONFIG.guideFadeStartY) {
+          fade = clamp(
+            (p.y - CONFIG.guideFadeEndY) / (CONFIG.guideFadeStartY - CONFIG.guideFadeEndY),
+            0,
+            1
+          );
+        }
+        if (fade <= 0) continue;
+
+        const rr = Math.max(2.1, 5.2 - i * 0.052);
+        ctx.fillStyle = `rgba(255,255,255,${0.34 * fade})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = "rgba(255,255,255,.78)";
+      ctx.font = "12px system-ui";
+      ctx.textAlign = "center";
+      const sign = shot.offsetDeg > 0 ? "+" : "";
+      ctx.fillText(`aim ${sign}${shot.offsetDeg.toFixed(0)}°`, shooter.x, shooter.y - 58);
+
+      ctx.restore();
+    }
+
+    // 直前ショットの初速方向を一瞬残す
+    if (lastShotTrace && now - lastShotTrace.bornAt < 700) {
+      const t = 1 - (now - lastShotTrace.bornAt) / 700;
+      ctx.save();
+      ctx.strokeStyle = `rgba(120,220,255,${0.65 * t})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(lastShotTrace.x, lastShotTrace.y);
+      ctx.lineTo(lastShotTrace.x + lastShotTrace.dirX * 120, lastShotTrace.y + lastShotTrace.dirY * 120);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // cannon
+    ctx.save();
+    ctx.translate(shooter.x, shooter.y);
+    ctx.rotate(Math.atan2(shot.dirY, shot.dirX));
+
+    ctx.fillStyle = ready ? "rgba(255,255,255,.88)" : "rgba(255,255,255,.38)";
+    roundRect(0, -10, 44, 20, 10, true);
+
+    ctx.fillStyle = "rgba(30,40,65,.95)";
+    roundRect(8, -6, 28, 12, 6, true);
+    ctx.restore();
+
+    // base + current shootable object
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.14)";
+    ctx.beginPath();
+    ctx.arc(shooter.x, shooter.y, 34, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,.45)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 現在撃てるオブジェクトは発射砲上に表示
+    const currentR = Math.min(26, Math.max(11, CONFIG.radii[currentLevel] * 0.52));
+    ctx.fillStyle = colors[currentLevel];
+    ctx.beginPath();
+    ctx.arc(shooter.x, shooter.y, currentR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,.80)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.font = `700 ${Math.max(12, currentR * 0.62)}px system-ui`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(labels[currentLevel], shooter.x, shooter.y + 1);
+
+    // v60: 弾表示の上から砲身を薄く再描画して、5などでも発射方向が隠れないようにする。
+    ctx.save();
+    ctx.translate(shooter.x, shooter.y);
+    ctx.rotate(Math.atan2(shot.dirY, shot.dirX));
+    ctx.fillStyle = ready ? "rgba(255,255,255,.72)" : "rgba(255,255,255,.32)";
+    roundRect(18, -6, 28, 12, 6, true);
+    ctx.fillStyle = "rgba(30,40,65,.88)";
+    roundRect(23, -3.5, 18, 7, 4, true);
+    ctx.restore();
+
+    ctx.restore();
+
+    // NEXT preview: 次に撃てるもの。砲台上の現在弾より小さく表示
+    const nextX = shooter.x + 78;
+    const nextY = shooter.y;
+    const previewR = Math.max(9, CONFIG.radii[nextLevel] * 0.46);
+
+    ctx.save();
+    ctx.fillStyle = "rgba(9,14,28,.88)";
+    roundRect(nextX - 28, nextY - 28, 56, 62, 14, true);
+    ctx.strokeStyle = "rgba(255,255,255,.14)";
+    ctx.lineWidth = 1.5;
+    roundRect(nextX - 28, nextY - 28, 56, 62, 14, false);
+
+    ctx.fillStyle = "rgba(255,255,255,.62)";
+    ctx.font = "10px system-ui";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("NEXT", nextX, nextY - 11);
+
+    ctx.fillStyle = colors[nextLevel];
+    ctx.beginPath();
+    ctx.arc(nextX, nextY + 12, previewR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,.72)";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.font = `700 ${Math.max(10, previewR * 0.58)}px system-ui`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(labels[nextLevel], nextX, nextY + 13);
+    ctx.restore();
+  }
+
+  function drawGameOver() {
+    ctx.save();
+    ctx.fillStyle = "rgba(4,8,18,.75)";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 34px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("GAME OVER", W / 2, H / 2 - 34);
+    ctx.font = "700 14px system-ui";
+    ctx.fillStyle = "rgba(255,210,210,.95)";
+    ctx.fillText("地面に触れた！", W / 2, H / 2 - 8);
+    ctx.fillStyle = "#fff";
+
+    ctx.font = "700 18px system-ui";
+    ctx.fillText(`SCORE ${score}`, W / 2, H / 2 + 2);
+
+    ctx.fillStyle = "rgba(255,255,255,.72)";
+    ctx.font = "14px system-ui";
+    ctx.fillText("タップまたは R でリスタート", W / 2, H / 2 + 34);
+    ctx.restore();
+  }
+
+  function draw() {
+    const now = performance.now();
+
+    drawBackground();
+
+    for (const p of pendingNuisances) drawPendingNuisance(p, now);
+
+    const sorted = objects.slice().sort((a, b) => a.r - b.r);
+    for (const o of sorted) drawBall(o);
+
+    drawParticles(now);
+
+    drawShooter(now);
+
+    if (gameOver) drawGameOver();
+  }
+
+  function loop(ts) {
+    const dt = clamp((ts - lastTs) / 16.6667, 0.2, 2.2);
+    lastTs = ts;
+
+    updateGame(dt, ts);
+    draw();
+
+    requestAnimationFrame(loop);
+  }
+
+  function roundRect(x, y, w, h, r, fill) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    else ctx.stroke();
+  }
+
+  function shade(hex, amount) {
+    const c = hex.replace("#", "");
+    const n = parseInt(c, 16);
+    let r = (n >> 16) + amount;
+    let g = ((n >> 8) & 255) + amount;
+    let b = (n & 255) + amount;
+    r = clamp(r, 0, 255);
+    g = clamp(g, 0, 255);
+    b = clamp(b, 0, 255);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+    if (gameOver) {
+      reset();
+      return;
+    }
+
+    startDrag(getPointer(e));
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    e.preventDefault();
+    updateDrag(getPointer(e));
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    endDrag();
+  });
+
+  canvas.addEventListener("pointercancel", () => {
+    drag = null;
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "r" || e.key === "R") reset();
+  });
+
+  loadHighScore();
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
