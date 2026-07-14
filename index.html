@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Reverse Merge Bubble Prototype v68 - Stack Pressure Propagation</title>
+  <title>Reverse Merge Bubble Prototype v72 - Contact Network Pressure Wave</title>
   <style>
     * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -84,7 +84,7 @@
 <div id="wrap">
   <canvas id="game" width="390" height="844"></canvas>
 </div>
-<div id="note">v68: 縦積み圧力伝播＋BGM・SE / R: retry</div>
+<div id="note">v72: 強打時の接触ネットワーク圧力波 / R: retry</div>
 
 <script>
 (() => {
@@ -114,7 +114,7 @@
     shotPowerMin: 0.625,
     shotPowerMax: 32,
     shotPowerCurve: 1.0,
-    shotPowerStartDistance: 44, // v68: ここまでは最低速。スマホで低速調整しやすくする
+    shotPowerStartDistance: 44, // v72: ここまでは最低速。スマホで低速調整しやすくする
     reloadTimeMs: 180,
     guideFadeStartY: 530,     // ここから上でガイドを薄くする
     guideFadeEndY: 420,       // 画面中央付近で見えなくする
@@ -135,12 +135,12 @@
 
     // settled bubble behavior
     buoyancy: -0.043,         // 接触後・停止後の泡だけ上へ浮く
-    // v68: 盤面全体の超弱い「呼吸」。約18秒周期で浮力を±3%だけ変化させる。
+    // v72: 盤面全体の超弱い「呼吸」。約18秒周期で浮力を±3%だけ変化させる。
     breathingEnabled: true,
     breathingPeriodMs: 18000,
     breathingBuoyancyAmplitude: 0.03,
 
-    // v68: 縦積みで下側ほど浮力が加算される。
+    // v72: 縦積みで下側ほど浮力が加算される。
     stackBuoyancyEnabled: true,
     stackBuoyancyPerLayer: 0.08,
     stackBuoyancyMaxBonus: 0.24,
@@ -150,23 +150,34 @@
     stackRecentShotBoost: 1.5,
     stackRecentShotBoostMs: 700,
 
-    // v68: 下側で生じた追加浮力を、接触している上側の列へ減衰伝播。
+    // v72: 下側で生じた追加浮力を、接触している上側の列へ減衰伝播。
     stackPressurePropagationEnabled: true,
     stackPressureTransfer: 0.72,
     stackPressureMaxDepth: 4,
     stackPressureMaxBonus: 0.42,
+
+    // v72: 強いショットの衝突エネルギーを、接触ネットワークへ減衰伝播。
+    pressureWaveEnabled: true,
+    pressureWaveImpactThreshold: 5.2,
+    pressureWaveBaseVelocity: 0.82,
+    pressureWavePowerScale: 0.72,
+    pressureWaveTransfer: 0.67,
+    pressureWaveMaxDepth: 7,
+    pressureWaveContactTolerance: 9,
+    pressureWaveMinStrength: 0.045,
+    pressureWaveTangentialBreak: 0.16,
     maxUpSpeed: -1.65,
     damping: 0.992,
-    wallRestitution: 0.38,
-    objectRestitution: 0.125,
-    collisionAbsorption: 0.145,
+    wallRestitution: 0.34,
+    objectRestitution: 0.18,
+    collisionAbsorption: 0.08,
     squashImpactThreshold: 2.35,
     squashMax: 0.145,
     squashRecover: 0.42,
     squashVisibleMs: 260,
     squashPowerCurve: 1.35,
     collisionCompressionMax: 0.18,
-    compressionPassDamping: 0.925,
+    compressionPassDamping: 0.96,
     highImpactRestitutionReduction: 0.55,
     ambientBubbleCount: 60,
     ambientBubbleMinR: 1,
@@ -196,8 +207,8 @@
     sameLevelMergeAssistTopBoost: 0.35,
     ceilingBuoyancySlideStrength: 0.075,
     ceilingContactDownBias: 0.018,
-    contactFriction: 0.018,
-    spinToMotionFriction: 0.0065,
+    contactFriction: 0.006,
+    spinToMotionFriction: 0.0025,
     angularDamping: 0.9975,
     idleSpinBiasStrength: 0.00018,
     maxAngularVelocity: 0.006,
@@ -212,7 +223,7 @@
     mergeCooldownMs: 180,
     scoreBase: 10,
     mergeImpulse: 0.075,
-    // v68: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
+    // v72: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
     mergeImpulseRadius: 120,
     mergeImpulseStrength: 1.05,
     mergeImpulseMinStrength: 0.12,
@@ -220,7 +231,7 @@
     mergeImpulseNuisanceScale: 0.85,
     mergeImpulseAngularStrength: 0.018,
 
-    // v68: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
+    // v72: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
     topReliefZone: 122,
     topReliefCountThreshold: 7,
     topReliefStillSpeedThreshold: 0.42,
@@ -234,7 +245,7 @@
     // nuisance
     nuisanceEnabled: true,
             nuisanceRadiusLevelEquivalent: 2,
-    // v68: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
+    // v72: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
     nuisanceSoftEnabled: true,
     nuisanceSoftExtraCompression: 0.075,
     nuisanceSoftImpactThresholdScale: 0.58,
@@ -293,7 +304,7 @@
     y: H - CONFIG.shooterYOffset
   };
 
-  const seabedY = H - 129; // v68: 地面を上げ、発射台下端が中央の地面に接する位置
+  const seabedY = H - 129; // v72: 地面を上げ、発射台下端が中央の地面に接する位置
   const fieldCenterX = W / 2;
 
   function fieldNx(x) {
@@ -301,20 +312,13 @@
     return clamp((x - fieldCenterX) / half, -1, 1);
   }
 
-  // ツムランド風：上辺は中央が持ち上がる弧
+  // v72: 上辺を完全にフラット化。
   function topArcY(x) {
-    const nx = fieldNx(x);
-    return CONFIG.topPadding - CONFIG.topArcDepth * (1 - nx * nx);
+    return CONFIG.topPadding;
   }
 
   function topArcNormal(x) {
-    const half = (W - CONFIG.sidePadding * 2) / 2;
-    const nx = fieldNx(x);
-    const dydx = (2 * CONFIG.topArcDepth * nx) / half;
-    let nxv = -dydx;
-    let nyv = 1;
-    const len = Math.hypot(nxv, nyv) || 1;
-    return { x: nxv / len, y: nyv / len };
+    return { x: 0, y: 1 };
   }
 
   // 下辺/海底側：中央が少しせり上がる弧
@@ -329,7 +333,7 @@
     return 1 - Math.abs(t * 2 - 1);
   }
 
-  // v68: トゲを廃止。ゲームオーバー境界も滑らかな地面そのもの。
+  // v72: トゲを廃止。ゲームオーバー境界も滑らかな地面そのもの。
   function seabedSpikeY(x) {
     return seabedArcY(x);
   }
@@ -356,7 +360,7 @@
     "#5de0bd", "#ffd0f3", "#ffffff"
   ];
   const labels = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-  // v68: レベル10を最終到達点にしたスイカゲーム式の合成得点。
+  // v72: レベル10を最終到達点にしたスイカゲーム式の合成得点。
   // 1+1で2を作ると1点、9+9で10を作ると55点。
   const suikaMergeScores = [0, 0, 1, 3, 6, 10, 15, 21, 28, 36, 55];
 
@@ -374,6 +378,9 @@
   let gameOver = false;
   let lastShotAt = -9999;
   let lastTs = performance.now();
+  let physicsAccumulatorMs = 0;
+  const FIXED_PHYSICS_MS = 1000 / 60;
+  const MAX_CATCHUP_STEPS = 5;
   let lastShotTrace = null;
   let pendingNuisances = [];
   let gameStartAt = performance.now();
@@ -394,6 +401,7 @@
   let bgmTimer = null;
   let bgmLoopStartedAt = 0;
   let bgmNextStep = 0;
+  let audioPausedByVisibility = false;
   const BGM_BPM = 80;
   const BGM_STEP_SEC = 60 / BGM_BPM / 2; // 8分音符
   const BGM_LOOP_SEC = 45;               // 15小節 × 4拍 @ 80 BPM
@@ -693,6 +701,39 @@
     }
   }
 
+  async function pauseAudioForBackground() {
+    if (!audioCtx) return;
+
+    stopBgm();
+    audioPausedByVisibility = true;
+
+    try {
+      if (audioCtx.state === "running") {
+        await audioCtx.suspend();
+      }
+    } catch (_) {}
+  }
+
+  async function resumeAudioFromBackground() {
+    if (!audioCtx || !audioPausedByVisibility || !gameStarted) return;
+    if (document.hidden) return;
+
+    audioPausedByVisibility = false;
+
+    try {
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
+    } catch (_) {
+      return;
+    }
+
+    // 復帰時は45秒ループの先頭から再開し、古い予約音を持ち越さない。
+    bgmLoopStartedAt = audioCtx.currentTime + 0.08;
+    bgmNextStep = 0;
+    startBgm();
+  }
+
   async function startGameFromTap() {
     await unlockAudio();
     gameStarted = true;
@@ -702,7 +743,7 @@
 
   function loadHighScore() {
     try {
-      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v68");
+      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v72");
       highScore = v ? Math.max(0, Number(v) || 0) : 0;
     } catch (_) {
       highScore = 0;
@@ -711,7 +752,7 @@
 
   function saveHighScore() {
     try {
-      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v68", String(highScore));
+      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v72", String(highScore));
     } catch (_) {}
   }
 
@@ -729,7 +770,7 @@
 
   function loadLevel10Best() {
     try {
-      const v = localStorage.getItem("reverse_merge_bubble_level10_best_v68");
+      const v = localStorage.getItem("reverse_merge_bubble_level10_best_v72");
       const n = v == null ? NaN : Number(v);
       level10BestMs = Number.isFinite(n) && n > 0 ? n : null;
     } catch (_) {
@@ -740,7 +781,7 @@
   function saveLevel10Best() {
     try {
       if (level10BestMs != null) {
-        localStorage.setItem("reverse_merge_bubble_level10_best_v68", String(level10BestMs));
+        localStorage.setItem("reverse_merge_bubble_level10_best_v72", String(level10BestMs));
       }
     } catch (_) {}
   }
@@ -892,6 +933,8 @@
       squashAngle: 0,
       squashAt: -9999,
       lastMergedAt: -9999,
+      pressureWaveArmed: active,
+      launchPowerRatio: 0,
       marked: false,
       overSince: null
     };
@@ -917,6 +960,8 @@
     gameOverAt = null;
     gameOverTouchedIds = [];
     gameEndElapsedMs = 0;
+    physicsAccumulatorMs = 0;
+    lastTs = performance.now();
     level10ReachedMs = null;
     level10CelebrationAt = null;
     runStartingHighScore = highScore;
@@ -965,7 +1010,7 @@
 
     const pullDistance = clamp(pullDistanceRaw, 0, CONFIG.dragMaxDistance);
 
-    // v68:
+    // v72:
     // 最大引っ張り距離と最大射出速度は維持したまま、
     // 低速域だけ物理的な引っ張り幅を長く取る。
     // shotPowerStartDistanceまでは最低速、その先から最大距離までを0〜1に再マップ。
@@ -1086,6 +1131,8 @@
       active: true
     });
 
+    ball.launchPowerRatio = shot.powerRatio;
+    ball.pressureWaveArmed = true;
     objects.push(ball);
 
     lastShotTrace = {
@@ -1309,32 +1356,20 @@
           o.vx -= (1 + e) * vn * n.x;
           o.vy -= (1 + e) * vn * n.y;
         } else {
-          // Remove inward normal component but keep tangent movement
-          o.vx -= vn * n.x;
-          o.vy -= vn * n.y;
+          // フラット天井では上向き成分だけを除去し、横速度はほぼそのまま残す。
+          // これにより天井へ押し付けられた球が貼り付かず、左右へ逃げやすくなる。
+          o.vy = Math.max(0, o.vy);
 
-          // 浮力が弧の天井に押し付けることで、接線方向の力に変換される。
-          // 水流ではなく、上に行こうとする力が状況を少し変えるための処理。
-          const half = (W - CONFIG.sidePadding * 2) / 2;
-          const slope = (2 * CONFIG.topArcDepth * fieldNx(o.x)) / half;
-          const tangentX = n.y;
-          const tangentY = -n.x;
-          const reliefSlide = CONFIG.topReliefSlideBoost * currentTopReliefLevel;
-          const buoyancySlide = -slope * (CONFIG.ceilingBuoyancySlideStrength + reliefSlide);
-
-          o.vx += tangentX * buoyancySlide;
-          o.vy += tangentY * buoyancySlide * 0.45;
-
-          // 壁との弱い摩擦。回転が天井の接線方向の動きに少し変換される。
+          // 回転から横移動へ変換する量もごく弱くする。
           const spinSlip = (o.angularVelocity || 0) * o.r;
-          const wallFriction = spinSlip * CONFIG.spinToMotionFriction;
-          o.vx += tangentX * wallFriction;
-          o.vy += tangentY * wallFriction * 0.45;
-          o.angularVelocity *= 0.992;
+          o.vx += spinSlip * CONFIG.spinToMotionFriction;
+          o.angularVelocity *= 0.996;
 
-          // 強すぎる上向き貼り付きだけ抑える。完全には殺さない。
-          o.vy = Math.max(o.vy, CONFIG.buoyancy * 0.55);
-          o.vy += CONFIG.ceilingContactDownBias;
+          // 密集時の救済横揺らぎは既存のtopReliefに任せる。
+          if (currentTopReliefLevel > 0) {
+            const phase = performance.now() * 0.0021 + o.id * 1.93;
+            o.vx += Math.sin(phase) * CONFIG.topReliefSlideBoost * currentTopReliefLevel * 0.35;
+          }
         }
       }
     }
@@ -1352,6 +1387,130 @@
     if (now - a.lastMergedAt < CONFIG.mergeCooldownMs) return false;
     if (now - b.lastMergedAt < CONFIG.mergeCooldownMs) return false;
     return true;
+  }
+
+  function propagatePressureWave(shot, firstTarget, impactSpeed, dirX, dirY, now) {
+    if (!CONFIG.pressureWaveEnabled || !shot.pressureWaveArmed) return;
+    if (impactSpeed < CONFIG.pressureWaveImpactThreshold) return;
+
+    shot.pressureWaveArmed = false;
+
+    const power01 = clamp(
+      (impactSpeed - CONFIG.pressureWaveImpactThreshold) /
+      Math.max(1, CONFIG.shotPowerMax - CONFIG.pressureWaveImpactThreshold),
+      0,
+      1
+    );
+
+    const launchPower = clamp(shot.launchPowerRatio || 0, 0, 1);
+    const initialStrength =
+      CONFIG.pressureWaveBaseVelocity *
+      (0.42 + power01 * 0.58) *
+      (1 + launchPower * CONFIG.pressureWavePowerScale);
+
+    const candidates = objects.filter(o =>
+      !o.marked &&
+      o !== shot &&
+      !o.active
+    );
+
+    // 現在の接触関係をグラフ化。
+    const contacts = new Map();
+    for (const o of candidates) contacts.set(o.id, []);
+
+    for (let i = 0; i < candidates.length; i++) {
+      const a = candidates[i];
+      for (let j = i + 1; j < candidates.length; j++) {
+        const b = candidates[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy);
+        const touchLimit = a.r + b.r + CONFIG.pressureWaveContactTolerance;
+
+        if (d <= 0.0001 || d > touchLimit) continue;
+
+        const nx = dx / d;
+        const ny = dy / d;
+
+        contacts.get(a.id).push({ object: b, nx, ny });
+        contacts.get(b.id).push({ object: a, nx: -nx, ny: -ny });
+      }
+    }
+
+    const queue = [{
+      object: firstTarget,
+      depth: 0,
+      strength: initialStrength,
+      inX: dirX,
+      inY: dirY
+    }];
+
+    const bestStrength = new Map([[firstTarget.id, initialStrength]]);
+
+    while (queue.length > 0) {
+      const node = queue.shift();
+      const o = node.object;
+
+      // 力の主方向はショット方向。接触形状に応じた微小な接線成分で
+      // 完全な対称ロックだけを崩す。
+      const tangentX = -node.inY;
+      const tangentY = node.inX;
+      const sideSign = Math.sign((o.x - shot.x) || Math.sin(o.id * 2.17) || 1);
+      const breakAmount = CONFIG.pressureWaveTangentialBreak * sideSign;
+
+      o.vx += node.inX * node.strength + tangentX * node.strength * breakAmount;
+      o.vy += node.inY * node.strength + tangentY * node.strength * breakAmount * 0.35;
+
+      // 見た目は控えめに、衝撃が伝わったことだけ示す。
+      const visualSquash = Math.min(
+        CONFIG.squashMax * 0.32,
+        node.strength * 0.025
+      );
+      if (visualSquash > (o.squash || 0)) {
+        o.squash = visualSquash;
+        o.squashAngle = Math.atan2(node.inY, node.inX);
+        o.squashAt = now;
+      }
+
+      if (node.depth >= CONFIG.pressureWaveMaxDepth) continue;
+
+      const neighbors = contacts.get(o.id) || [];
+      for (const edge of neighbors) {
+        const next = edge.object;
+
+        // 主にショット進行方向側へ伝える。横方向には少し許容し、
+        // 密集盤面全体へ圧力が回り込む余地を残す。
+        const forward = edge.nx * node.inX + edge.ny * node.inY;
+        if (forward < -0.18) continue;
+
+        const alignment = 0.58 + 0.42 * clamp(forward, 0, 1);
+        const nextStrength =
+          node.strength *
+          CONFIG.pressureWaveTransfer *
+          alignment;
+
+        if (nextStrength < CONFIG.pressureWaveMinStrength) continue;
+
+        const previous = bestStrength.get(next.id) || 0;
+        if (nextStrength <= previous) continue;
+        bestStrength.set(next.id, nextStrength);
+
+        // 接触法線と元の進行方向を混ぜ、実際の接触網に沿って伝播。
+        let nextDirX = node.inX * 0.58 + edge.nx * 0.42;
+        let nextDirY = node.inY * 0.58 + edge.ny * 0.42;
+        const len = Math.hypot(nextDirX, nextDirY) || 1;
+        nextDirX /= len;
+        nextDirY /= len;
+
+        queue.push({
+          object: next,
+          depth: node.depth + 1,
+          strength: nextStrength,
+          inX: nextDirX,
+          inY: nextDirY
+        });
+      }
+    }
   }
 
   function resolveCollision(a, b, now) {
@@ -1382,6 +1541,23 @@
     const squashThreshold = CONFIG.squashImpactThreshold * (nuisanceContact ? CONFIG.nuisanceSoftImpactThresholdScale : 1);
     const rawImpact = clamp((impactSpeed - squashThreshold) / 7.0, 0, 1);
     const impact01 = Math.pow(rawImpact, CONFIG.squashPowerCurve);
+
+    // v72: 発射弾が盤面へ強く当たった瞬間、その衝撃を接触網へ一度だけ伝える。
+    const activeShot = a.active ? a : (b.active ? b : null);
+    const firstTarget = activeShot === a ? b : (activeShot === b ? a : null);
+    if (activeShot && firstTarget && activeShot.pressureWaveArmed) {
+      const shotSpeed = Math.hypot(activeShot.vx, activeShot.vy);
+      const shotDirX = shotSpeed > 0.0001 ? activeShot.vx / shotSpeed : nx;
+      const shotDirY = shotSpeed > 0.0001 ? activeShot.vy / shotSpeed : ny;
+      propagatePressureWave(
+        activeShot,
+        firstTarget,
+        Math.max(impactSpeed, shotSpeed),
+        shotDirX,
+        shotDirY,
+        now
+      );
+    }
 
     if (canMerge(a, b, now)) {
       return {
@@ -1565,7 +1741,7 @@
       }
     }
 
-    // v68: 合体時の軽い周囲衝撃。
+    // v72: 合体時の軽い周囲衝撃。
     // スイカゲームのような「合体したら周りが少し崩れて連鎖する」余地を作る。
     for (const o of objects) {
       if (o === merged || o.marked) continue;
@@ -1783,7 +1959,7 @@
 
     if (!CONFIG.stackPressurePropagationEnabled) return bonusById;
 
-    // v68:
+    // v72:
     // 下側の追加浮力を、同じ接触列の上側へ直接伝える。
     // 1段上へ72%、2段上へその72%…と減衰し、暴れすぎないよう上限を設ける。
     for (const source of settled) {
@@ -1855,7 +2031,7 @@
     const topRelief = computeTopRelief(now);
     currentTopReliefLevel = topRelief.level;
 
-    // v68: 約18秒周期で浮力を±3%だけ揺らす。
+    // v72: 約18秒周期で浮力を±3%だけ揺らす。
     // 見た目にはほぼ分からないが、長時間の完全膠着を少し崩す。
     const breathingPhase = (now % CONFIG.breathingPeriodMs) / CONFIG.breathingPeriodMs * Math.PI * 2;
     const breathingMultiplier = CONFIG.breathingEnabled
@@ -1926,7 +2102,7 @@
               o.vy += Math.cos(unstickPhase * 0.73) * CONFIG.stuckUnstickStrength * 0.32 * topPressure * calmAfterShot * stepDt;
             }
 
-            // v68: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
+            // v72: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
             // 常時水流ではなく、詰まり時の「まぎれ」用。
             if (currentTopReliefLevel > 0) {
               const reliefPhase = now * 0.0024 + o.id * 2.113;
@@ -2113,7 +2289,7 @@
     }
     ctx.stroke();
 
-    // v68: 滑らかな海底。トゲ・危険バー・警告文は表示しない。
+    // v72: 滑らかな海底。トゲ・危険バー・警告文は表示しない。
     ctx.save();
 
     const grd = ctx.createLinearGradient(0, seabedY - CONFIG.seabedArcHeight, 0, H);
@@ -2668,12 +2844,26 @@
   }
 
   function loop(ts) {
-    const dt = clamp((ts - lastTs) / 16.6667, 0.2, 2.2);
+    // v72:
+    // requestAnimationFrame は端末によって60Hz/120Hzなど異なる。
+    // 衝突解決回数まで描画Hzに依存していたため、iPhoneでは球速・反発が
+    // PCと異なって見えることがあった。物理更新だけ常に60Hzへ固定する。
+    let elapsedMs = ts - lastTs;
     lastTs = ts;
 
-    updateGame(dt, ts);
-    draw();
+    // タブ復帰時などに一気に何十回も物理更新しない。
+    elapsedMs = clamp(elapsedMs, 0, FIXED_PHYSICS_MS * MAX_CATCHUP_STEPS);
+    physicsAccumulatorMs += elapsedMs;
 
+    let steps = 0;
+    while (physicsAccumulatorMs >= FIXED_PHYSICS_MS && steps < MAX_CATCHUP_STEPS) {
+      updateGame(1, ts);
+      physicsAccumulatorMs -= FIXED_PHYSICS_MS;
+      steps++;
+    }
+
+    // 120Hz端末では描画だけ120Hz、物理は60Hz。
+    draw();
     requestAnimationFrame(loop);
   }
 
@@ -2730,6 +2920,30 @@
 
   canvas.addEventListener("pointercancel", () => {
     drag = null;
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      pauseAudioForBackground();
+    } else {
+      resumeAudioFromBackground();
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    pauseAudioForBackground();
+  });
+
+  window.addEventListener("pageshow", () => {
+    resumeAudioFromBackground();
+  });
+
+  window.addEventListener("blur", () => {
+    pauseAudioForBackground();
+  });
+
+  window.addEventListener("focus", () => {
+    resumeAudioFromBackground();
   });
 
   window.addEventListener("keydown", (e) => {
