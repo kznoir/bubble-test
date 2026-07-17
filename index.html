@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Reverse Merge Bubble Prototype v77 - No Nuisance</title>
+  <title>Reverse Merge Bubble Prototype v76 - Stronger Merge Blast</title>
   <style>
     * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -84,7 +84,7 @@
 <div id="wrap">
   <canvas id="game" width="390" height="844"></canvas>
 </div>
-<div id="note">v77: 合体時の周囲押し出しを強化 / R: retry</div>
+<div id="note">v76: 合体時の周囲押し出しを強化 / R: retry</div>
 
 <script>
 (() => {
@@ -114,7 +114,7 @@
     shotPowerMin: 0.625,
     shotPowerMax: 32,
     shotPowerCurve: 1.0,
-    shotPowerStartDistance: 44, // v77: ここまでは最低速。スマホで低速調整しやすくする
+    shotPowerStartDistance: 44, // v76: ここまでは最低速。スマホで低速調整しやすくする
     reloadTimeMs: 180,
     guideFadeStartY: 530,     // ここから上でガイドを薄くする
     guideFadeEndY: 420,       // 画面中央付近で見えなくする
@@ -136,12 +136,12 @@
 
     // settled bubble behavior
     buoyancy: -0.056,         // 接触後・停止後の泡だけ上へ浮く
-    // v77: 盤面全体の超弱い「呼吸」。約18秒周期で浮力を±3%だけ変化させる。
+    // v76: 盤面全体の超弱い「呼吸」。約18秒周期で浮力を±3%だけ変化させる。
     breathingEnabled: true,
     breathingPeriodMs: 18000,
     breathingBuoyancyAmplitude: 0.03,
 
-    // v77: 縦積みで下側ほど浮力が加算される。
+    // v76: 縦積みで下側ほど浮力が加算される。
     stackBuoyancyEnabled: true,
     stackBuoyancyPerLayer: 0.08,
     stackBuoyancyMaxBonus: 0.24,
@@ -151,13 +151,13 @@
     stackRecentShotBoost: 1.5,
     stackRecentShotBoostMs: 700,
 
-    // v77: 下側で生じた追加浮力を、接触している上側の列へ減衰伝播。
+    // v76: 下側で生じた追加浮力を、接触している上側の列へ減衰伝播。
     stackPressurePropagationEnabled: true,
     stackPressureTransfer: 0.72,
     stackPressureMaxDepth: 4,
     stackPressureMaxBonus: 0.42,
 
-    // v77: 強いショットの衝突エネルギーを、接触ネットワークへ減衰伝播。
+    // v76: 強いショットの衝突エネルギーを、接触ネットワークへ減衰伝播。
     pressureWaveEnabled: true,
     pressureWaveImpactThreshold: 5.2,
     pressureWaveBaseVelocity: 0.82,
@@ -211,7 +211,7 @@
     contactFriction: 0.006,
     spinToMotionFriction: 0.0025,
 
-    // v77: 上向き浮力で斜めに押し合った時、接触法線の横成分へ逃げる力を足す。
+    // v76: 上向き浮力で斜めに押し合った時、接触法線の横成分へ逃げる力を足す。
     buoyancySideEscapeEnabled: true,
     buoyancySideEscapeStrength: 0.055,
     buoyancySideEscapeMax: 0.16,
@@ -230,7 +230,7 @@
     mergeCooldownMs: 180,
     scoreBase: 10,
     mergeImpulse: 0.075,
-    // v77: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
+    // v76: 合体時に周囲を少し押して、詰まり盤面にラッキーな崩れを作る
     mergeImpulseRadius: 145,
     mergeImpulseStrength: 1.55,
     mergeImpulseMinStrength: 0.20,
@@ -238,7 +238,7 @@
     mergeImpulseNuisanceScale: 0.95,
     mergeImpulseAngularStrength: 0.026,
 
-    // v77: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
+    // v76: 上端が詰まって静止した時だけ、天井沿いの逃げを少し強める
     topReliefZone: 122,
     topReliefCountThreshold: 7,
     topReliefStillSpeedThreshold: 0.42,
@@ -250,9 +250,9 @@
     level10CelebrationMs: 1200,
 
     // nuisance
-    nuisanceEnabled: false,
+    nuisanceEnabled: true,
             nuisanceRadiusLevelEquivalent: 2,
-    // v77: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
+    // v76: お邪魔バブルだけ、物理的には少し柔らかくする。見た目の潰れは控えめ。
     nuisanceSoftEnabled: true,
     nuisanceSoftExtraCompression: 0.075,
     nuisanceSoftImpactThresholdScale: 0.58,
@@ -311,7 +311,7 @@
     y: H - CONFIG.shooterYOffset
   };
 
-  const seabedY = H - 129; // v77: 地面を上げ、発射台下端が中央の地面に接する位置
+  const seabedY = H - 129; // v76: 地面を上げ、発射台下端が中央の地面に接する位置
   const fieldCenterX = W / 2;
 
   function fieldNx(x) {
@@ -319,7 +319,7 @@
     return clamp((x - fieldCenterX) / half, -1, 1);
   }
 
-  // v77: 上辺を完全にフラット化。
+  // v76: 上辺を完全にフラット化。
   function topArcY(x) {
     return CONFIG.topPadding;
   }
@@ -340,7 +340,7 @@
     return 1 - Math.abs(t * 2 - 1);
   }
 
-  // v77: トゲを廃止。ゲームオーバー境界も滑らかな地面そのもの。
+  // v76: トゲを廃止。ゲームオーバー境界も滑らかな地面そのもの。
   function seabedSpikeY(x) {
     return seabedArcY(x);
   }
@@ -367,7 +367,7 @@
     "#5de0bd", "#ffd0f3", "#ffffff"
   ];
   const labels = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-  // v77: レベル10を最終到達点にしたスイカゲーム式の合成得点。
+  // v76: レベル10を最終到達点にしたスイカゲーム式の合成得点。
   // 1+1で2を作ると1点、9+9で10を作ると55点。
   const suikaMergeScores = [0, 0, 1, 3, 6, 10, 15, 21, 28, 36, 55];
 
@@ -750,7 +750,7 @@
 
   function loadHighScore() {
     try {
-      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v77");
+      const v = localStorage.getItem("reverse_merge_bubble_highscore_level10max_v76");
       highScore = v ? Math.max(0, Number(v) || 0) : 0;
     } catch (_) {
       highScore = 0;
@@ -759,7 +759,7 @@
 
   function saveHighScore() {
     try {
-      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v77", String(highScore));
+      localStorage.setItem("reverse_merge_bubble_highscore_level10max_v76", String(highScore));
     } catch (_) {}
   }
 
@@ -777,7 +777,7 @@
 
   function loadLevel10Best() {
     try {
-      const v = localStorage.getItem("reverse_merge_bubble_level10_best_v77");
+      const v = localStorage.getItem("reverse_merge_bubble_level10_best_v76");
       const n = v == null ? NaN : Number(v);
       level10BestMs = Number.isFinite(n) && n > 0 ? n : null;
     } catch (_) {
@@ -788,7 +788,7 @@
   function saveLevel10Best() {
     try {
       if (level10BestMs != null) {
-        localStorage.setItem("reverse_merge_bubble_level10_best_v77", String(level10BestMs));
+        localStorage.setItem("reverse_merge_bubble_level10_best_v76", String(level10BestMs));
       }
     } catch (_) {}
   }
@@ -1017,7 +1017,7 @@
 
     const pullDistance = clamp(pullDistanceRaw, 0, CONFIG.dragMaxDistance);
 
-    // v77:
+    // v76:
     // 最大引っ張り距離と最大射出速度は維持したまま、
     // 低速域だけ物理的な引っ張り幅を長く取る。
     // shotPowerStartDistanceまでは最低速、その先から最大距離までを0〜1に再マップ。
@@ -1353,7 +1353,7 @@
       }
     }
 
-    // v77: フラット天井。球全体が必ず天井の内側に収まるよう厳密にクランプ。
+    // v76: フラット天井。球全体が必ず天井の内側に収まるよう厳密にクランプ。
     const topLimit = CONFIG.topPadding + o.r;
     if (o.y < topLimit) {
       o.y = topLimit;
@@ -1548,7 +1548,7 @@
     const rawImpact = clamp((impactSpeed - squashThreshold) / 7.0, 0, 1);
     const impact01 = Math.pow(rawImpact, CONFIG.squashPowerCurve);
 
-    // v77: 発射弾が盤面へ強く当たった瞬間、その衝撃を接触網へ一度だけ伝える。
+    // v76: 発射弾が盤面へ強く当たった瞬間、その衝撃を接触網へ一度だけ伝える。
     const activeShot = a.active ? a : (b.active ? b : null);
     const firstTarget = activeShot === a ? b : (activeShot === b ? a : null);
     if (activeShot && firstTarget && activeShot.pressureWaveArmed) {
@@ -1633,7 +1633,7 @@
     b.x += nx * overlap * bShare;
     b.y += ny * overlap * bShare;
 
-    // v77:
+    // v76:
     // 縦または斜めに重なった通常オブジェクト同士では、
     // 浮力で押し続ける力の一部を接触面の横方向へ変換する。
     // これにより「斜めに縦積みしてもそのまま固まる」状態を減らす。
@@ -1788,7 +1788,7 @@
       }
     }
 
-    // v77: 合体時の軽い周囲衝撃。
+    // v76: 合体時の軽い周囲衝撃。
     // スイカゲームのような「合体したら周りが少し崩れて連鎖する」余地を作る。
     for (const o of objects) {
       if (o === merged || o.marked) continue;
@@ -2006,7 +2006,7 @@
 
     if (!CONFIG.stackPressurePropagationEnabled) return bonusById;
 
-    // v77:
+    // v76:
     // 下側の追加浮力を、同じ接触列の上側へ直接伝える。
     // 1段上へ72%、2段上へその72%…と減衰し、暴れすぎないよう上限を設ける。
     for (const source of settled) {
@@ -2078,7 +2078,7 @@
     const topRelief = computeTopRelief(now);
     currentTopReliefLevel = topRelief.level;
 
-    // v77: 約18秒周期で浮力を±3%だけ揺らす。
+    // v76: 約18秒周期で浮力を±3%だけ揺らす。
     // 見た目にはほぼ分からないが、長時間の完全膠着を少し崩す。
     const breathingPhase = (now % CONFIG.breathingPeriodMs) / CONFIG.breathingPeriodMs * Math.PI * 2;
     const breathingMultiplier = CONFIG.breathingEnabled
@@ -2149,7 +2149,7 @@
               o.vy += Math.cos(unstickPhase * 0.73) * CONFIG.stuckUnstickStrength * 0.32 * topPressure * calmAfterShot * stepDt;
             }
 
-            // v77: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
+            // v76: 上端が混雑して止まっている時だけ、天井近くの泡をほんの少し起こす。
             // 常時水流ではなく、詰まり時の「まぎれ」用。
             if (currentTopReliefLevel > 0) {
               const reliefPhase = now * 0.0024 + o.id * 2.113;
@@ -2212,7 +2212,7 @@
 
       objects = objects.filter(o => !o.marked);
 
-      // v77: 衝突の位置補正で天井外へ押し出されても、その場で必ず戻す。
+      // v76: 衝突の位置補正で天井外へ押し出されても、その場で必ず戻す。
       for (const o of objects) {
         const ceilingY = CONFIG.topPadding + o.r;
         if (o.y < ceilingY) {
@@ -2345,7 +2345,7 @@
     }
     ctx.stroke();
 
-    // v77: 滑らかな海底。トゲ・危険バー・警告文は表示しない。
+    // v76: 滑らかな海底。トゲ・危険バー・警告文は表示しない。
     ctx.save();
 
     const grd = ctx.createLinearGradient(0, seabedY - CONFIG.seabedArcHeight, 0, H);
@@ -2900,7 +2900,7 @@
   }
 
   function loop(ts) {
-    // v77:
+    // v76:
     // requestAnimationFrame は端末によって60Hz/120Hzなど異なる。
     // 衝突解決回数まで描画Hzに依存していたため、iPhoneでは球速・反発が
     // PCと異なって見えることがあった。物理更新だけ常に60Hzへ固定する。
